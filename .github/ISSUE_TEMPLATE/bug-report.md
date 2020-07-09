@@ -4,14 +4,15 @@ about: Tell us about uncompyle6 bugs
 
 ---
 
-<!-- __Note:__ Have you read https://github.com/rocky/python-uncompyle6/blob/master/HOW-TO-REPORT-A-BUG.md ?
+<!-- __Note:__ unless you are a sponsor of the project, it may take a while, maybe a week or so, before the bug report is noticed, let alone acted upon. Have you read https://github.com/rocky/python-uncompyle6/blob/master/HOW-TO-REPORT-A-BUG.md ?
+
 
 Please remove any of the optional sections if they are not applicable.
 
 Prerequisites
 
 * Make sure the bytecode you have can be disassembled with a
-  disassembler.
+  disassembler and produces valid results.
 * Don't put bytecode and corresponding source code on any service that
   requires registration to download.
 * When you open a bug report there is no privacy. If the legitimacy of
@@ -19,13 +20,6 @@ Prerequisites
   making the issue even more easy to detect.
 
 Bug reports that violate a prerequisite may be discarded.
-
-Note that there are way more bug-fix requestors than there are bug
-fixers. If you want you need more immediate, confidential or urgent
-assistance
-
-http://www.crazy-compilers.com/decompyle/ offers a byte-code
-decompiler service for versions of Python up to 2.6.
 
 -->
 
@@ -35,7 +29,7 @@ decompiler service for versions of Python up to 2.6.
 
 ## How to Reproduce
 
-<!-- Please show both the input you gave and the
+<!-- Please show both the *input* you gave and the
 output you got in describing how to reproduce the bug:
 
 or give a complete console log with input and output
@@ -63,7 +57,7 @@ can add that too.
 Please modify for your setup
 
 - Uncompyle6 version: output from  `uncompyle6 --version` or `pip show uncompyle6`
-- Python version: `python -V`
+- Python version for the version of Python the byte-compiled the file: `python -c "import sys; print(sys.version)"` where `python` is the correct Cpython or Pypy binary.
 - OS and Version: [e.g. Ubuntu bionic]
 
 -->

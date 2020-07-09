@@ -134,8 +134,9 @@ class Python30Parser(Python31Parser):
 
         jump_except           ::= _jump COME_FROM POP_TOP
 
+        expr_jt               ::= expr jmp_true
         or                    ::= expr jmp_false expr jmp_true expr
-        or                    ::= expr jmp_true expr
+        or                    ::= expr_jt expr
 
         import_from ::= LOAD_CONST LOAD_CONST IMPORT_NAME importlist _come_froms POP_TOP
 
@@ -212,7 +213,7 @@ class Python30Parser(Python31Parser):
         whilestmt      ::= SETUP_LOOP testexpr l_stmts_opt JUMP_BACK POP_BLOCK JUMP_BACK COME_FROM_LOOP
         whilestmt      ::= SETUP_LOOP testexpr returns POP_TOP POP_BLOCK COME_FROM_LOOP
         withasstmt     ::= expr SETUP_WITH store suite_stmts_opt POP_BLOCK LOAD_CONST COME_FROM_WITH WITH_CLEANUP END_FINALLY
-        withstmt       ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK LOAD_CONST COME_FROM_WITH WITH_CLEANUP END_FINALLY
+        with           ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK LOAD_CONST COME_FROM_WITH WITH_CLEANUP END_FINALLY
 
         # lc_body ::= LOAD_FAST expr LIST_APPEND
         # lc_body ::= LOAD_NAME expr LIST_APPEND
@@ -263,9 +264,9 @@ class Python30Parser(Python31Parser):
                              compare_chained2 COME_FROM
         ret_or           ::= expr JUMP_IF_TRUE_OR_POP  ret_expr_or_cond COME_FROM
         ret_and          ::= expr JUMP_IF_FALSE_OR_POP ret_expr_or_cond COME_FROM
-        ret_cond         ::= expr POP_JUMP_IF_FALSE expr RETURN_END_IF
+        if_exp_ret       ::= expr POP_JUMP_IF_FALSE expr RETURN_END_IF
                              COME_FROM ret_expr_or_cond
-        ret_expr_or_cond ::= ret_cond
+        ret_expr_or_cond ::= if_exp_ret
         or               ::= expr JUMP_IF_TRUE_OR_POP expr COME_FROM
         and              ::= expr JUMP_IF_TRUE_OR_POP expr COME_FROM
         and              ::= expr JUMP_IF_FALSE_OR_POP expr COME_FROM

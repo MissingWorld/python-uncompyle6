@@ -17,6 +17,10 @@ class Python35Parser(Python34Parser):
     def p_35on(self, args):
         """
 
+        # FIXME! isolate this to only loops!
+        _ifstmts_jump  ::= c_stmts_opt come_froms
+        ifelsestmt ::= testexpr c_stmts_opt jump_forward_else else_suite _come_froms
+
         pb_ja ::= POP_BLOCK JUMP_ABSOLUTE
 
         # The number of canned instructions in new statements is mind boggling.
@@ -46,7 +50,7 @@ class Python35Parser(Python34Parser):
 
         # Python 3.5+ has WITH_CLEANUP_START/FINISH
 
-        withstmt   ::= expr
+        with       ::= expr
                        SETUP_WITH POP_TOP suite_stmts_opt
                        POP_BLOCK LOAD_CONST COME_FROM_WITH
                        WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
@@ -134,7 +138,7 @@ class Python35Parser(Python34Parser):
         self.remove_rules("""
           yield_from ::= expr GET_ITER LOAD_CONST YIELD_FROM
           yield_from ::= expr expr YIELD_FROM
-          withstmt   ::= expr SETUP_WITH POP_TOP suite_stmts_opt
+          with       ::= expr SETUP_WITH POP_TOP suite_stmts_opt
                          POP_BLOCK LOAD_CONST COME_FROM_WITH
                          WITH_CLEANUP END_FINALLY
           withasstmt ::= expr SETUP_WITH store suite_stmts_opt
@@ -167,26 +171,33 @@ class Python35Parser(Python34Parser):
             elif opname == 'BEFORE_ASYNC_WITH' and self.version < 3.8:
                 # Some Python 3.5+ async additions
                 rules_str = """
-                   async_with_stmt ::= expr
-                   stmt ::= async_with_stmt
+                   async_with_stmt    ::= expr
+                   stmt               ::= async_with_stmt
+                   async_with_pre     ::= BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM SETUP_ASYNC_WITH
+                   async_with_post    ::= COME_FROM_ASYNC_WITH
+                                          WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
+                                          WITH_CLEANUP_FINISH END_FINALLY
 
-                   async_with_stmt ::= expr
-                            BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                            SETUP_ASYNC_WITH POP_TOP suite_stmts_opt
-                            POP_BLOCK LOAD_CONST COME_FROM_ASYNC_WITH
-                            WITH_CLEANUP_START
-                            GET_AWAITABLE LOAD_CONST YIELD_FROM
-                            WITH_CLEANUP_FINISH END_FINALLY
+                   async_with_stmt    ::= expr
+                                          async_with_pre
+                                          POP_TOP
+                                          suite_stmts_opt
+                                          POP_BLOCK LOAD_CONST
+                                          async_with_post
+                   async_with_stmt    ::= expr
+                                          async_with_pre
+                                          POP_TOP
+                                          suite_stmts_opt
+                                          async_with_post
 
-                   stmt ::= async_with_as_stmt
+                   stmt               ::= async_with_as_stmt
 
                    async_with_as_stmt ::= expr
-                               BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                               SETUP_ASYNC_WITH store suite_stmts_opt
-                               POP_BLOCK LOAD_CONST COME_FROM_ASYNC_WITH
-                               WITH_CLEANUP_START
-                               GET_AWAITABLE LOAD_CONST YIELD_FROM
-                               WITH_CLEANUP_FINISH END_FINALLY
+                                          async_with_pre
+                                          store
+                                          suite_stmts_opt
+                                          POP_BLOCK LOAD_CONST
+                                          async_with_post
                 """
                 self.addRule(rules_str, nop_func)
             elif opname == 'BUILD_MAP_UNPACK':
@@ -198,10 +209,10 @@ class Python35Parser(Python34Parser):
             elif opname == 'SETUP_WITH':
                 # Python 3.5+ has WITH_CLEANUP_START/FINISH
                 rules_str = """
-                  withstmt   ::= expr
-                       SETUP_WITH POP_TOP suite_stmts_opt
-                       POP_BLOCK LOAD_CONST COME_FROM_WITH
-                       WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                  with ::= expr
+                           SETUP_WITH POP_TOP suite_stmts_opt
+                           POP_BLOCK LOAD_CONST COME_FROM_WITH
+                           WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
 
                   withasstmt ::= expr
                        SETUP_WITH store suite_stmts_opt
@@ -252,7 +263,9 @@ class Python35Parser(Python34Parser):
             # zero or not in creating a template rule.
             self.add_unique_rule(rule, token.kind, args_pos, customize)
         else:
-            super(Python35Parser, self).custom_classfunc_rule(opname, token, customize, *args)
+            super(Python35Parser, self).custom_classfunc_rule(opname, token, customize, *args
+            )
+
 
 class Python35ParserSingle(Python35Parser, PythonParserSingle):
     pass

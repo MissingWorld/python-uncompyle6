@@ -1,4 +1,4 @@
-#  Copyright (c) 2015-2019 by Rocky Bernstein
+#  Copyright (c) 2015-2020 by Rocky Bernstein
 #  Copyright (c) 2005 by Dan Pascu <dan@windowmaker.org>
 #  Copyright (c) 2000-2002 by hartmut Goebel <h.goebel@crazy-compilers.com>
 #
@@ -29,8 +29,8 @@ For example:
 Finally we save token information.
 """
 
-from xdis.code import iscode
-from xdis.bytecode import instruction_size, _get_const_info
+from xdis import iscode, instruction_size, Instruction
+from xdis.bytecode import _get_const_info
 
 from uncompyle6.scanner import Token
 import xdis
@@ -253,6 +253,39 @@ class Scanner37Base(Scanner):
                     pass
                 pass
 
+        # Operand values in Python wordcode are small. As a result,
+        # there are these EXTENDED_ARG instructions - way more than
+        # before 3.6. These parsing a lot of pain.
+
+        # To simplify things we want to untangle this. We also
+        # do this loop before we compute jump targets.
+        for i, inst in enumerate(self.insts):
+
+            # One artifact of the "too-small" operand problem, is that
+            # some backward jumps, are turned into forward jumps to another
+            # "extended arg" backward jump to the same location.
+            if inst.opname == "JUMP_FORWARD":
+                jump_inst = self.insts[self.offset2inst_index[inst.argval]]
+                if jump_inst.has_extended_arg and jump_inst.opname.startswith("JUMP"):
+                    # Create comination of the jump-to instruction and
+                    # this one. Keep the position information of this instruction,
+                    # but the operator and operand properties come from the other
+                    # instruction
+                    self.insts[i] = Instruction(
+                        jump_inst.opname,
+                        jump_inst.opcode,
+                        jump_inst.optype,
+                        jump_inst.inst_size,
+                        jump_inst.arg,
+                        jump_inst.argval,
+                        jump_inst.argrepr,
+                        jump_inst.has_arg,
+                        inst.offset,
+                        inst.starts_line,
+                        inst.is_jump_target,
+                        inst.has_extended_arg,
+                    )
+
         # Get jump targets
         # Format: {target offset: [jump offsets]}
         jump_targets = self.find_jump_targets(show_asm)
@@ -302,6 +335,7 @@ class Scanner37Base(Scanner):
                             offset="%s_%s" % (inst.offset, jump_idx),
                             has_arg=True,
                             opc=self.opc,
+                            has_extended_arg=False,
                         ),
                     )
                     jump_idx += 1
@@ -318,6 +352,7 @@ class Scanner37Base(Scanner):
                         offset="%s" % (inst.offset),
                         has_arg=True,
                         opc=self.opc,
+                        has_extended_arg=inst.has_extended_arg,
                     ),
                 )
 
@@ -358,6 +393,10 @@ class Scanner37Base(Scanner):
                     # other parts like n_LOAD_CONST in pysource.py for example.
                     pattr = const
                     pass
+            elif opname == "IMPORT_NAME":
+                if "." in inst.argval:
+                    opname = "IMPORT_NAME_ATTR"
+                    pass
             elif opname in ("MAKE_FUNCTION", "MAKE_CLOSURE"):
                 flags = argval
                 opname = "MAKE_FUNCTION_%d" % (flags)
@@ -378,6 +417,7 @@ class Scanner37Base(Scanner):
                         op=op,
                         has_arg=inst.has_arg,
                         opc=self.opc,
+                        has_extended_arg=inst.has_extended_arg,
                     ),
                 )
                 continue
@@ -471,13 +511,14 @@ class Scanner37Base(Scanner):
                     op=op,
                     has_arg=inst.has_arg,
                     opc=self.opc,
+                    has_extended_arg=inst.has_extended_arg,
                 ),
             )
             pass
 
         if show_asm in ("both", "after"):
             for t in tokens:
-                print(t.format(line_prefix="L."))
+                print(t.format(line_prefix=""))
             print()
         return tokens, customize
 
@@ -516,6 +557,7 @@ class Scanner37Base(Scanner):
             offset = inst.offset
             op = inst.opcode
 
+            # FIXME: this code is going to get removed.
             # Determine structures and fix jumps in Python versions
             # since 2.3
             self.detect_control_flow(offset, targets, i)
@@ -887,6 +929,7 @@ class Scanner37Base(Scanner):
                 count_END_FINALLY += 1
             elif op in self.setup_opts_no_loop:
                 count_SETUP_ += 1
+
 
 if __name__ == "__main__":
     from uncompyle6 import PYTHON_VERSION

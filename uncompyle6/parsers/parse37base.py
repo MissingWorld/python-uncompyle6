@@ -1,11 +1,24 @@
-#  Copyright (c) 2016-2017, 2019 Rocky Bernstein
+#  Copyright (c) 2016-2017, 2019-2020 Rocky Bernstein
 """
 Python 3.7 base code. We keep non-custom-generated grammar rules out of this file.
 """
-from uncompyle6.scanners.tok import Token
-from uncompyle6.parser import PythonParser, PythonParserSingle, nop_func
+from uncompyle6.parser import ParserError, PythonParser, nop_func
 from uncompyle6.parsers.treenode import SyntaxTree
 from spark_parser import DEFAULT_DEBUG as PARSER_DEFAULT_DEBUG
+from spark_parser.spark import rule2str
+
+from uncompyle6.parsers.reducecheck import (
+    and_check,
+    ifelsestmt,
+    iflaststmt,
+    ifstmt,
+    ifstmts_jump,
+    or_check,
+    testtrue,
+    tryelsestmtl3,
+    while1stmt,
+    while1elsestmt,
+)
 
 
 class Python37BaseParser(PythonParser):
@@ -114,6 +127,7 @@ class Python37BaseParser(PythonParser):
                 "RAISE",
                 "SETUP",
                 "UNPACK",
+                "WITH",
             )
         )
 
@@ -146,12 +160,11 @@ class Python37BaseParser(PythonParser):
               stmt ::= assign2_pypy
               assign3_pypy       ::= expr expr expr store store store
               assign2_pypy       ::= expr expr store store
-              stmt               ::= if_expr_lambda
-              stmt               ::= conditional_not_lambda
-              if_expr_lambda     ::= expr jmp_false expr return_if_lambda
+              stmt               ::= if_exp_lambda
+              stmt               ::= if_exp_not_lambda
+              if_exp_lambda      ::= expr jmp_false expr return_if_lambda
                                      return_lambda LAMBDA_MARKER
-              conditional_not_lambda
-                                 ::= expr jmp_true expr return_if_lambda
+              if_exp_not_lambda  ::= expr jmp_true expr return_if_lambda
                                      return_lambda LAMBDA_MARKER
               """,
                 nop_func,
@@ -198,37 +211,111 @@ class Python37BaseParser(PythonParser):
 
                 if self.version < 3.8:
                     rules_str += """
-                       async_with_stmt    ::= expr
-                                              BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              SETUP_ASYNC_WITH POP_TOP suite_stmts_opt
-                                              POP_BLOCK LOAD_CONST COME_FROM_ASYNC_WITH
-                                              WITH_CLEANUP_START
-                                              GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              WITH_CLEANUP_FINISH END_FINALLY
-                       async_with_as_stmt ::= expr
-                                              BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              SETUP_ASYNC_WITH store suite_stmts_opt
-                                              POP_BLOCK LOAD_CONST COME_FROM_ASYNC_WITH
-                                              WITH_CLEANUP_START
-                                              GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              WITH_CLEANUP_FINISH END_FINALLY
+                      stmt                 ::= async_with_stmt SETUP_ASYNC_WITH
+                      c_stmt               ::= c_async_with_stmt SETUP_ASYNC_WITH
+                      async_with_stmt      ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               suite_stmts_opt
+                                               POP_BLOCK LOAD_CONST
+                                               async_with_post
+                      c_async_with_stmt    ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               c_suite_stmts_opt
+                                               POP_BLOCK LOAD_CONST
+                                               async_with_post
+                      async_with_stmt      ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               suite_stmts_opt
+                                               async_with_post
+                      c_async_with_stmt    ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               c_suite_stmts_opt
+                                               async_with_post
+                      async_with_as_stmt   ::= expr
+                                               async_with_pre
+                                               store
+                                               suite_stmts_opt
+                                               POP_BLOCK LOAD_CONST
+                                               async_with_post
+                      c_async_with_as_stmt ::= expr
+                                              async_with_pre
+                                              store
+                                              c_suite_stmts_opt
+                                              POP_BLOCK LOAD_CONST
+                                              async_with_post
+                      async_with_as_stmt   ::= expr
+                                              async_with_pre
+                                              store
+                                              suite_stmts_opt
+                                              async_with_post
+                      c_async_with_as_stmt ::= expr
+                                              async_with_pre
+                                              store
+                                              suite_stmts_opt
+                                              async_with_post
                     """
                 else:
                     rules_str += """
-                       async_with_stmt    ::= expr
-                                              BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              SETUP_ASYNC_WITH POP_TOP suite_stmts
-                                              POP_TOP POP_BLOCK BEGIN_FINALLY COME_FROM_ASYNC_WITH
-                                              WITH_CLEANUP_START
-                                              GET_AWAITABLE LOAD_CONST YIELD_FROM
+                      async_with_pre       ::= BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM SETUP_ASYNC_WITH
+                      async_with_post      ::= BEGIN_FINALLY COME_FROM_ASYNC_WITH
+                                               WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
+                                               WITH_CLEANUP_FINISH END_FINALLY
+                      async_with_stmt      ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               suite_stmts
+                                               POP_TOP POP_BLOCK
+                                               async_with_post
+                      c_async_with_stmt    ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               c_suite_stmts
+                                               POP_TOP POP_BLOCK
+                                               async_with_post
+                      async_with_stmt      ::= expr
+                                               async_with_pre
+                                               POP_TOP
+                                               suite_stmts
+                                               POP_BLOCK
+                                               BEGIN_FINALLY
+                                               WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
+                                               WITH_CLEANUP_FINISH POP_FINALLY LOAD_CONST RETURN_VALUE
+                                               COME_FROM_ASYNC_WITH
+                                               WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
+                                               WITH_CLEANUP_FINISH END_FINALLY
+                      c_async_with_stmt   ::= expr
+                                              async_with_pre
+                                              POP_TOP
+                                              c_suite_stmts
+                                              POP_BLOCK
+                                              BEGIN_FINALLY
+                                              WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
+                                              WITH_CLEANUP_FINISH POP_FINALLY LOAD_CONST RETURN_VALUE
+                                              COME_FROM_ASYNC_WITH
+                                              WITH_CLEANUP_START GET_AWAITABLE LOAD_CONST YIELD_FROM
                                               WITH_CLEANUP_FINISH END_FINALLY
-                       async_with_as_stmt ::= expr
-                                              BEFORE_ASYNC_WITH GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              SETUP_ASYNC_WITH store suite_stmts
-                                              POP_TOP POP_BLOCK BEGIN_FINALLY COME_FROM_ASYNC_WITH
-                                              WITH_CLEANUP_START
-                                              GET_AWAITABLE LOAD_CONST YIELD_FROM
-                                              WITH_CLEANUP_FINISH END_FINALLY
+                      async_with_as_stmt   ::= expr
+                                               async_with_pre
+                                               store suite_stmts
+                                               POP_TOP POP_BLOCK
+                                               async_with_post
+                      c_async_with_as_stmt ::= expr
+                                               async_with_pre
+                                               store suite_stmts
+                                               POP_TOP POP_BLOCK
+                                               async_with_post
+                      async_with_as_stmt   ::= expr
+                                               async_with_pre
+                                               store suite_stmts
+                                               POP_BLOCK async_with_post
+                      c_async_with_as_stmt ::= expr
+                                               async_with_pre
+                                               store suite_stmts
+                                               POP_BLOCK async_with_post
                     """
                 self.addRule(rules_str, nop_func)
 
@@ -424,6 +511,7 @@ class Python37BaseParser(PythonParser):
                      dict_comp    ::= LOAD_DICTCOMP LOAD_STR MAKE_FUNCTION_0 expr
                                       GET_ITER CALL_FUNCTION_1
                     classdefdeco1 ::= expr classdefdeco2 CALL_FUNCTION_1
+                    classdefdeco1 ::= expr classdefdeco1 CALL_FUNCTION_1
                     """
                     self.addRule(rule, nop_func)
 
@@ -492,7 +580,7 @@ class Python37BaseParser(PythonParser):
                 self.addRule(
                     """
                     expr      ::= get_iter
-                    attribute ::= expr GET_ITER
+                    get_iter  ::= expr GET_ITER
                     """,
                     nop_func,
                 )
@@ -506,7 +594,7 @@ class Python37BaseParser(PythonParser):
 
                     stmt                ::= genexpr_func_async
 
-                    func_async_prefix   ::= SETUP_EXCEPT GET_ANEXT LOAD_CONST YIELD_FROM
+                    func_async_prefix   ::= _come_froms SETUP_EXCEPT GET_ANEXT LOAD_CONST YIELD_FROM
                     func_async_middle   ::= POP_BLOCK JUMP_FORWARD COME_FROM_EXCEPT
                                             DUP_TOP LOAD_GLOBAL COMPARE_OP POP_JUMP_IF_TRUE
                                             END_FINALLY COME_FROM
@@ -515,34 +603,36 @@ class Python37BaseParser(PythonParser):
                                             JUMP_BACK COME_FROM
                                             POP_TOP POP_TOP POP_TOP POP_EXCEPT POP_TOP
 
-                    expr                ::= listcomp_async
-                    listcomp_async      ::= LOAD_LISTCOMP LOAD_STR MAKE_FUNCTION_0
+                    expr                ::= list_comp_async
+                    list_comp_async     ::= LOAD_LISTCOMP LOAD_STR MAKE_FUNCTION_0
                                             expr GET_AITER CALL_FUNCTION_1
                                             GET_AWAITABLE LOAD_CONST
                                             YIELD_FROM
 
-                    expr                 ::= listcomp_async
-                    listcomp_async       ::= BUILD_LIST_0 LOAD_FAST func_async_prefix
+                    expr                ::= list_comp_async
+                    list_afor2          ::= func_async_prefix
                                             store func_async_middle list_iter
                                             JUMP_BACK COME_FROM
                                             POP_TOP POP_TOP POP_TOP POP_EXCEPT POP_TOP
-
+                    list_comp_async     ::= BUILD_LIST_0 LOAD_FAST list_afor2
+                    get_aiter           ::= expr GET_AITER
+                    list_afor           ::= get_aiter list_afor2
+                    list_iter           ::= list_afor
                    """,
                     nop_func,
                 )
-                custom_ops_processed.add(opname)
             elif opname == "JUMP_IF_NOT_DEBUG":
                 v = token.attr
                 self.addRule(
                     """
                     stmt        ::= assert_pypy
                     stmt        ::= assert2_pypy", nop_func)
-                    assert_pypy ::=  JUMP_IF_NOT_DEBUG assert_expr jmp_true
+                    assert_pypy ::=  JUMP_IF_NOT_DEBUG expr jmp_true
                                      LOAD_ASSERT RAISE_VARARGS_1 COME_FROM
                     assert2_pypy ::= JUMP_IF_NOT_DEBUG assert_expr jmp_true
                                      LOAD_ASSERT expr CALL_FUNCTION_1
                                      RAISE_VARARGS_1 COME_FROM
-                    assert2_pypy ::= JUMP_IF_NOT_DEBUG assert_expr jmp_true
+                    assert2_pypy ::= JUMP_IF_NOT_DEBUG expr jmp_true
                                      LOAD_ASSERT expr CALL_FUNCTION_1
                                      RAISE_VARARGS_1 COME_FROM,
                     """,
@@ -580,6 +670,21 @@ class Python37BaseParser(PythonParser):
             elif opname == "LOAD_LISTCOMP":
                 self.add_unique_rule("expr ::= listcomp", opname, token.attr, customize)
                 custom_ops_processed.add(opname)
+            elif opname == "LOAD_NAME":
+                if (
+                    token.attr == "__annotations__"
+                    and "SETUP_ANNOTATIONS" in self.seen_ops
+                ):
+                    token.kind = "LOAD_ANNOTATION"
+                    self.addRule(
+                        """
+                        stmt       ::= SETUP_ANNOTATIONS
+                        stmt       ::= ann_assign
+                        ann_assign ::= expr LOAD_ANNOTATION LOAD_STR STORE_SUBSCR
+                        """,
+                        nop_func,
+                    )
+                    pass
             elif opname == "LOAD_SETCOMP":
                 # Should this be generalized and put under MAKE_FUNCTION?
                 if has_get_iter_call_function1:
@@ -889,55 +994,70 @@ class Python37BaseParser(PythonParser):
                 )
                 custom_ops_processed.add(opname)
 
+            elif opname == "WITH_CLEANUP_START":
+                rules_str = """
+                  stmt        ::= with_null
+                  with_null   ::= with_suffix
+                  with_suffix ::= WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                """
+                self.addRule(rules_str, nop_func)
             elif opname == "SETUP_WITH":
                 rules_str = """
-                  stmt       ::= withstmt
+                  stmt       ::= with
                   stmt       ::= withasstmt
 
-                  withstmt   ::= expr SETUP_WITH POP_TOP suite_stmts_opt COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                  with       ::= expr
+                                 SETUP_WITH POP_TOP
+                                 suite_stmts_opt
+                                 COME_FROM_WITH
+                                 with_suffix
                   withasstmt ::= expr SETUP_WITH store suite_stmts_opt COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                 with_suffix
 
-                  withstmt   ::= expr
-                                 SETUP_WITH POP_TOP suite_stmts_opt
+                  with       ::= expr
+                                 SETUP_WITH POP_TOP
+                                 suite_stmts_opt
                                  POP_BLOCK LOAD_CONST COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                 with_suffix
+
                   withasstmt ::= expr
                                  SETUP_WITH store suite_stmts_opt
                                  POP_BLOCK LOAD_CONST COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                 with_suffix
 
-                  withstmt   ::= expr
+                  with       ::= expr
                                  SETUP_WITH POP_TOP suite_stmts_opt
                                  POP_BLOCK LOAD_CONST COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                 with_suffix
                   withasstmt ::= expr
                                  SETUP_WITH store suite_stmts_opt
                                  POP_BLOCK LOAD_CONST COME_FROM_WITH
-                                 WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                 with_suffix
                 """
                 if self.version < 3.8:
                     rules_str += """
-                    withstmt   ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK
+                    with     ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK
                                    LOAD_CONST
-                                   WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                   with_suffix
                     """
                 else:
                     rules_str += """
-                      withstmt   ::= expr
+                      with       ::= expr
                                      SETUP_WITH POP_TOP suite_stmts_opt
                                      POP_BLOCK LOAD_CONST COME_FROM_WITH
-                                     WITH_CLEANUP_START WITH_CLEANUP_FINISH END_FINALLY
+                                     with_suffix
 
                       withasstmt ::= expr
                                      SETUP_WITH store suite_stmts_opt
                                      POP_BLOCK LOAD_CONST COME_FROM_WITH
 
-                       withstmt  ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK
+                      withasstmt ::= expr
+                                     SETUP_WITH store suite_stmts
+                                     POP_BLOCK BEGIN_FINALLY COME_FROM_WITH with_suffix
+
+                      with       ::= expr SETUP_WITH POP_TOP suite_stmts_opt POP_BLOCK
                                      BEGIN_FINALLY COME_FROM_WITH
-                                     WITH_CLEANUP_START WITH_CLEANUP_FINISH
-                                     END_FINALLY
+                                     with_suffix
                     """
                 self.addRule(rules_str, nop_func)
 
@@ -960,23 +1080,40 @@ class Python37BaseParser(PythonParser):
 
             pass
 
+        self.reduce_check_table = {
+            "_ifstmts_jump": ifstmts_jump,
+            "and": and_check,
+            "ifelsestmt": ifelsestmt,
+            "ifelsestmtl": ifelsestmt,
+            "iflaststmt": iflaststmt,
+            "iflaststmtl": iflaststmt,
+            "ifstmt": ifstmt,
+            "ifstmtl": ifstmt,
+            "or": or_check,
+            "testtrue": testtrue,
+            "testfalsel": testtrue,
+            "while1elsestmt": while1elsestmt,
+            "while1stmt": while1stmt,
+            "try_elsestmtl38": tryelsestmtl3,
+        }
+
         self.check_reduce["and"] = "AST"
+        self.check_reduce["annotate_tuple"] = "noAST"
         self.check_reduce["aug_assign1"] = "AST"
         self.check_reduce["aug_assign2"] = "AST"
         self.check_reduce["while1stmt"] = "noAST"
         self.check_reduce["while1elsestmt"] = "noAST"
         self.check_reduce["_ifstmts_jump"] = "AST"
         self.check_reduce["ifelsestmt"] = "AST"
+        self.check_reduce["ifelsestmtl"] = "AST"
         self.check_reduce["iflaststmt"] = "AST"
         self.check_reduce["iflaststmtl"] = "AST"
         self.check_reduce["ifstmt"] = "AST"
         self.check_reduce["ifstmtl"] = "AST"
-        self.check_reduce["annotate_tuple"] = "noAST"
-        self.check_reduce["or"] = "tokens"
-
-        # FIXME: remove parser errors caused by the below
-        # self.check_reduce['while1elsestmt'] = 'noAST'
-
+        self.check_reduce["import_from37"] = "AST"
+        self.check_reduce["or"] = "AST"
+        self.check_reduce["testtrue"] = "tokens"
+        self.check_reduce["testfalsel"] = "tokens"
         return
 
     def custom_classfunc_rule(self, opname, token, customize, next_token):
@@ -1026,8 +1163,8 @@ class Python37BaseParser(PythonParser):
                 + token.kind
             )
 
-            # Note: semantic actions make use of the fact of wheter  "args_pos"
-            # zero or not in creating a template rule.
+            # Note: Semantic actions make use of whether or not "args_pos"
+            # is zero when creating a template rule.
             self.add_unique_rule(rule, token.kind, args_pos, customize)
         else:
             token.kind = self.call_fn_name(token)
@@ -1061,321 +1198,40 @@ class Python37BaseParser(PythonParser):
     def reduce_is_invalid(self, rule, ast, tokens, first, last):
         lhs = rule[0]
         n = len(tokens)
+        last = min(last, n - 1)
+        fn = self.reduce_check_table.get(lhs, None)
+        try:
+            if fn:
+                return fn(self, lhs, n, rule, ast, tokens, first, last)
+        except:
+            import sys, traceback
 
-        if lhs == "and" and ast:
-            # FIXME: put in a routine somewhere
-            jmp = ast[1]
-            if jmp.kind.startswith("jmp_"):
-                if last == n:
-                    return True
-                jmp_target = jmp[0].attr
-                jmp_offset = jmp[0].offset
+            print(
+                ("Exception in %s %s\n"
+                 + "rule: %s\n"
+                 + "offsets %s .. %s")
+                % (
+                    fn.__name__,
+                    sys.exc_info()[1],
+                    rule2str(rule),
+                    tokens[first].offset,
+                    tokens[last].offset,
+                )
+            )
+            print(traceback.print_tb(sys.exc_info()[2], -1))
+            raise ParserError(tokens[last], tokens[last].off2int(), self.debug["rules"])
 
-                if tokens[first].off2int() <= jmp_target < tokens[last].off2int():
-                    return True
-                if rule == ("and", ("expr", "jmp_false", "expr", "jmp_false")):
-                    jmp2_target = ast[3][0].attr
-                    return jmp_target != jmp2_target
-                elif rule == ("and", ("expr", "jmp_false", "expr")):
-                    if tokens[last] == "POP_JUMP_IF_FALSE":
-                        # Ok if jump_target doesn't jump to last instruction
-                        return jmp_target != tokens[last].attr
-                    elif tokens[last] in ("POP_JUMP_IF_TRUE", "JUMP_IF_TRUE_OR_POP"):
-                        # Ok if jump_target jumps to a COME_FROM after
-                        # the last instruction or jumps right after last instruction
-                        if last + 1 < n and tokens[last + 1] == "COME_FROM":
-                            return jmp_target != tokens[last + 1].off2int()
-                        return jmp_target + 2 != tokens[last].attr
-                elif rule == ("and", ("expr", "jmp_false", "expr", "COME_FROM")):
-                    return ast[-1].attr != jmp_offset
-                # elif rule == ("and", ("expr", "jmp_false", "expr", "COME_FROM")):
-                #     return jmp_offset != tokens[first+3].attr
-
-                return jmp_target != tokens[last].off2int()
-            return False
-
-        elif lhs in ("aug_assign1", "aug_assign2") and ast[0][0] == "and":
+        if lhs in ("aug_assign1", "aug_assign2") and ast[0][0] == "and":
             return True
         elif lhs == "annotate_tuple":
             return not isinstance(tokens[first].attr, tuple)
-        elif lhs == "or":
-            # FIXME: This is a cheap test. Should we do something with an AST like we
-            # do with "and"?
-            # "or"s with constants like this will have "COME_FROM" at the end
-            return tokens[last] in ("LOAD_ASSERT", "LOAD_STR", "LOAD_CODE", "LOAD_CONST",
-                                    "RAISE_VARARGS_1")
-        elif lhs == "while1elsestmt":
-
-            if last == n:
-                # Adjust for fuzziness in parsing
-                last -= 1
-
-            if tokens[last] == "COME_FROM_LOOP":
-                last -= 1
-            elif tokens[last - 1] == "COME_FROM_LOOP":
-                last -= 2
-            if tokens[last] in ("JUMP_BACK", "CONTINUE"):
-                # These indicate inside a loop, but token[last]
-                # should not be in a loop.
-                # FIXME: Not quite right: refine by using target
-                return True
-
-            # if SETUP_LOOP target spans the else part, then this is
-            # not while1else. Also do for whileTrue?
-            last += 1
-            # 3.8+ Doesn't have SETUP_LOOP
-            return self.version < 3.8 and tokens[first].attr > tokens[last].off2int()
-
-        elif lhs == "while1stmt":
-
-            # If there is a fall through to the COME_FROM_LOOP, then this is
-            # not a while 1. So the instruction before should either be a
-            # JUMP_BACK or the instruction before should not be the target of a
-            # jump. (Well that last clause i not quite right; that target could be
-            # from dead code. Ugh. We need a more uniform control flow analysis.)
-            if last == n or tokens[last - 1] == "COME_FROM_LOOP":
-                cfl = last - 1
-            else:
-                cfl = last
-            assert tokens[cfl] == "COME_FROM_LOOP"
-
-            for i in range(cfl - 1, first, -1):
-                if tokens[i] != "POP_BLOCK":
-                    break
-            if tokens[i].kind not in ("JUMP_BACK", "RETURN_VALUE"):
-                if not tokens[i].kind.startswith("COME_FROM"):
-                    return True
-
-            # Check that the SETUP_LOOP jumps to the offset after the
-            # COME_FROM_LOOP
-            if 0 <= last < n and tokens[last] in ("COME_FROM_LOOP", "JUMP_BACK"):
-                # jump_back should be right before COME_FROM_LOOP?
-                last += 1
-            if last == n:
-                last -= 1
-            offset = tokens[last].off2int()
-            assert tokens[first] == "SETUP_LOOP"
-            if offset != tokens[first].attr:
-                return True
-            return False
-        elif lhs == "_ifstmts_jump" and len(rule[1]) > 1 and ast:
-            come_froms = ast[-1]
-            # Make sure all of the "come froms" offset at the
-            # end of the "if" come from somewhere inside the "if".
-            # Since the come_froms are ordered so that lowest
-            # offset COME_FROM is last, it is sufficient to test
-            # just the last one.
-
-            # This is complicated, but note that the JUMP_IF instruction comes immediately
-            # *before* _ifstmts_jump so that's what we have to test
-            # the COME_FROM against. This can be complicated by intervening
-            # POP_TOP, and pseudo COME_FROM, ELSE instructions
-            #
-            pop_jump_index = first - 1
-            while pop_jump_index > 0 and tokens[pop_jump_index] in (
-                "ELSE",
-                "POP_TOP",
-                "JUMP_FORWARD",
-                "COME_FROM",
-            ):
-                pop_jump_index -= 1
-            come_froms = ast[-1]
-
-            # FIXME: something is fishy when and EXTENDED ARG is needed before the
-            # pop_jump_index instruction to get the argment. In this case, the
-            # _ifsmtst_jump can jump to a spot beyond the come_froms.
-            # That is going on in the non-EXTENDED_ARG case is that the POP_JUMP_IF
-            # jumps to a JUMP_(FORWARD) which is changed into an EXTENDED_ARG POP_JUMP_IF
-            # to the jumped forwareded address
-            if tokens[pop_jump_index].attr > 256:
-                return False
-
-            if isinstance(come_froms, Token):
-                return (
-                    come_froms.attr is not None
-                    and tokens[pop_jump_index].offset > come_froms.attr
-                )
-
-            elif len(come_froms) == 0:
-                return False
-            else:
-                return tokens[pop_jump_index].offset > come_froms[-1].attr
-
-        elif lhs in ("ifstmt", "ifstmtl"):
-            # FIXME: put in a routine somewhere
-
-            n = len(tokens)
-            if lhs == "ifstmtl":
-                if last == n:
-                    last -= 1
-                    pass
-                if (tokens[last].attr and isinstance(tokens[last].attr, int)):
-                    return tokens[first].offset < tokens[last].attr
-                pass
-
-            # Make sure jumps don't extend beyond the end of the if statement.
-            l = last
-            if l == n:
-                l -= 1
-            if isinstance(tokens[l].offset, str):
-                last_offset = int(tokens[l].offset.split("_")[0], 10)
-            else:
-                last_offset = tokens[l].offset
-            for i in range(first, l):
-                t = tokens[i]
-                if t.kind == "POP_JUMP_IF_FALSE":
-                    if t.attr > last_offset:
-                        return True
-                    pass
-                pass
-            pass
-
-            if ast:
-                testexpr = ast[0]
-
-                if (last + 1) < n and tokens[last + 1] == "COME_FROM_LOOP":
-                    # iflastsmtl jumped outside of loop. No good.
-                    return True
-
-                if testexpr[0] in ("testtrue", "testfalse"):
-                    test = testexpr[0]
-                    if len(test) > 1 and test[1].kind.startswith("jmp_"):
-                        if last == n:
-                            last -= 1
-                        jmp_target = test[1][0].attr
-                        if tokens[first].off2int() <= jmp_target < tokens[last].off2int():
-                            return True
-                        # jmp_target less than tokens[first] is okay - is to a loop
-                        # jmp_target equal tokens[last] is also okay: normal non-optimized non-loop jump
-                        if jmp_target > tokens[last].off2int():
-                            # One more weird case to look out for
-                            #   if c1:
-                            #      if c2:  # Jumps around the *outer* "else"
-                            #       ...
-                            #   else:
-                            if jmp_target == tokens[last - 1].attr:
-                                return False
-                            if last < n and tokens[last].kind.startswith("JUMP"):
-                                return False
-                            return True
-
-                    pass
-                pass
-            return False
-        elif lhs in ("iflaststmt", "iflaststmtl") and ast:
-            # FIXME: put in a routine somewhere
-            testexpr = ast[0]
-
-            if testexpr[0] in ("testtrue", "testfalse"):
-
-                test = testexpr[0]
-                if len(test) > 1 and test[1].kind.startswith("jmp_"):
-                    if last == n:
-                        last -= 1
-                    jmp_target = test[1][0].attr
-                    if tokens[first].off2int() <= jmp_target < tokens[last].off2int():
-                        return True
-                    # jmp_target less than tokens[first] is okay - is to a loop
-                    # jmp_target equal tokens[last] is also okay: normal non-optimized non-loop jump
-
-                    if (last + 1) < n and tokens[last - 1] != "JUMP_BACK" and tokens[last + 1] == "COME_FROM_LOOP":
-                        # iflastsmtl is not at the end of a loop, but jumped outside of loop. No good.
-                        # FIXME: check that tokens[last] == "POP_BLOCK"? Or allow for it not to appear?
-                        return True
-
-                    # If the instruction before "first" is a "POP_JUMP_IF_FALSE" which goes
-                    # to the same target as jmp_target, then this not nested "if .. if .."
-                    # but rather "if ... and ..."
-                    if first > 0 and tokens[first - 1] == "POP_JUMP_IF_FALSE":
-                        return tokens[first - 1].attr == jmp_target
-
-                    if jmp_target > tokens[last].off2int():
-                        # One more weird case to look out for
-                        #   if c1:
-                        #      if c2:  # Jumps around the *outer* "else"
-                        #       ...
-                        #   else:
-                        if jmp_target == tokens[last - 1].attr:
-                            return False
-                        if last < n and tokens[last].kind.startswith("JUMP"):
-                            return False
-                        return True
-
-                pass
-            return False
-
-        # FIXME: put in a routine somewhere
-        elif lhs == "ifelsestmt":
-
-            if (last + 1) < n and tokens[last + 1] == "COME_FROM_LOOP":
-                # ifelsestmt jumped outside of loop. No good.
-                return True
-
-            if rule not in (
-                (
-                    "ifelsestmt",
-                    (
-                        "testexpr",
-                        "c_stmts_opt",
-                        "jump_forward_else",
-                        "else_suite",
-                        "_come_froms",
-                    ),
-                ),
-                (
-                    "ifelsestmt",
-                    (
-                        "testexpr",
-                        "c_stmts_opt",
-                        "jf_cfs",
-                        "else_suite",
-                        "opt_come_from_except",
-                    ),
-                ),
-            ):
-                return False
-
-            # Make sure all of the "come froms" offset at the
-            # end of the "if" come from somewhere inside the "if".
-            # Since the come_froms are ordered so that lowest
-            # offset COME_FROM is last, it is sufficient to test
-            # just the last one.
-            come_froms = ast[-1]
-            if come_froms == "opt_come_from_except" and len(come_froms) > 0:
-                come_froms = come_froms[0]
-            if not isinstance(come_froms, Token):
-                return tokens[first].offset > come_froms[-1].attr
-            elif tokens[first].offset > come_froms.attr:
-                return True
-
-            # For mysterious reasons a COME_FROM in tokens[last+1] might be part of the grammar rule
-            # even though it is not found in come_froms.
-            # Work around this.
-            if (
-                last < n
-                and tokens[last] == "COME_FROM"
-                and tokens[first].offset > tokens[last].attr
-            ):
-                return True
-
-            testexpr = ast[0]
-
-            # Check that the condition portion of the "if"
-            # jumps to the "else" part.
-            # Compare with parse30.py of uncompyle6
-            if testexpr[0] in ("testtrue", "testfalse"):
-                test = testexpr[0]
-                if len(test) > 1 and test[1].kind.startswith("jmp_"):
-                    if last == n:
-                        last -= 1
-                    jmp = test[1]
-                    jmp_target = jmp[0].attr
-                    if tokens[first].off2int() > jmp_target:
-                        return True
-                    return (jmp_target > tokens[last].off2int()) and tokens[
-                        last
-                    ] != "JUMP_FORWARD"
-
+        elif lhs == "import_from37":
+            importlist37 = ast[3]
+            alias37 = importlist37[0]
+            if importlist37 == "importlist37" and alias37 == "alias37":
+                store = alias37[1]
+                assert store == "store"
+                return alias37[0].attr != store[0].attr
             return False
 
         return False

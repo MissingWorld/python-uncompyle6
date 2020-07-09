@@ -35,8 +35,8 @@ Finally we save token information.
 
 from __future__ import print_function
 
-from xdis.code import iscode
-from xdis.bytecode import instruction_size, _get_const_info
+from xdis import iscode, instruction_size
+from xdis.bytecode import _get_const_info
 
 from uncompyle6.scanner import Token, parse_fn_counts
 import xdis
@@ -379,7 +379,7 @@ class Scanner3(Scanner):
                     # pattr = 'code_object @ 0x%x %s->%s' %\
                     # (id(const), const.co_filename, const.co_name)
                     pattr = "<code_object " + const.co_name + ">"
-                elif isinstance(const, str):
+                elif isinstance(const, str) or xdis.PYTHON_VERSION <= 2.7 and isinstance(const, unicode):
                     opname = "LOAD_STR"
                 else:
                     if isinstance(inst.arg, int) and inst.arg < len(co.co_consts):
@@ -539,7 +539,7 @@ class Scanner3(Scanner):
 
         if show_asm in ("both", "after"):
             for t in tokens:
-                print(t.format(line_prefix="L."))
+                print(t.format(line_prefix=""))
             print()
         return tokens, customize
 
@@ -888,6 +888,7 @@ class Scanner3(Scanner):
                     start, self.next_stmt[offset], self.opc.POP_JUMP_IF_FALSE, target
                 )
 
+                # FIXME: Remove this whole "if" block
                 # If we still have any offsets in set, start working on it
                 if match:
                     is_jump_forward = self.is_jump_forward(pre_rtarget)
@@ -956,7 +957,7 @@ class Scanner3(Scanner):
                             )
                         ):
                             pass
-                        else:
+                        elif self.version <= 3.2:
                             fix = None
                             jump_ifs = self.inst_matches(
                                 start,

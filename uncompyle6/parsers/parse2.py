@@ -1,4 +1,4 @@
-#  Copyright (c) 2015-2019 Rocky Bernstein
+#  Copyright (c) 2015-2020 Rocky Bernstein
 #  Copyright (c) 2000-2002 by hartmut Goebel <h.goebel@crazy-compilers.com>
 #
 #  Copyright (c) 1999 John Aycock
@@ -27,6 +27,7 @@ that a later phase can turn into a sequence of ASCII text.
 
 from __future__ import print_function
 
+from uncompyle6.parsers.reducecheck import (except_handler_else, ifelsestmt, tryelsestmt)
 from uncompyle6.parser import PythonParser, PythonParserSingle, nop_func
 from uncompyle6.parsers.treenode import SyntaxTree
 from spark_parser import DEFAULT_DEBUG as PARSER_DEFAULT_DEBUG
@@ -146,10 +147,10 @@ class Python2Parser(PythonParser):
 
         # Move to 2.7? 2.6 may use come_froms
         tryelsestmtc    ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
-                            except_handler else_suitec COME_FROM
+                            except_handler_else else_suitec COME_FROM
 
         tryelsestmtl    ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
-                            except_handler else_suitel COME_FROM
+                            except_handler_else else_suitel COME_FROM
 
         try_except      ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
                             except_handler COME_FROM
@@ -160,6 +161,8 @@ class Python2Parser(PythonParser):
 
         except_handler  ::= jmp_abs COME_FROM except_stmts
                              END_FINALLY
+
+        except_handler_else  ::= except_handler
 
         except_stmts ::= except_stmt+
 
@@ -193,8 +196,9 @@ class Python2Parser(PythonParser):
         expr ::= slice3
         expr ::= unary_convert
 
-        and  ::= expr jmp_false expr come_from_opt
-        or   ::= expr jmp_true  expr come_from_opt
+        expr_jt  ::= expr jmp_true
+        or       ::= expr_jt  expr come_from_opt
+        and      ::= expr jmp_false expr come_from_opt
 
         unary_convert ::= expr UNARY_CONVERT
 
@@ -637,12 +641,23 @@ class Python2Parser(PythonParser):
             self.addRule(rule, nop_func)
             pass
 
+        self.reduce_check_table = {
+            # "and": and_check,
+            "except_handler_else": except_handler_else,
+            "ifelsestmt": ifelsestmt,
+            # "or": or_check,
+            "tryelsestmt": tryelsestmt,
+            "tryelsestmtl": tryelsestmt,
+        }
+        self.check_reduce["and"] = "AST"
+        self.check_reduce["except_handler_else"] = "tokens"
         self.check_reduce["raise_stmt1"] = "tokens"
         self.check_reduce["assert_expr_and"] = "AST"
         self.check_reduce["tryelsestmt"] = "AST"
         self.check_reduce["tryelsestmtl"] = "AST"
         self.check_reduce["aug_assign2"] = "AST"
         self.check_reduce["or"] = "AST"
+        self.check_reduce["ifstmt"] = "tokens"
         # self.check_reduce['_stmts'] = 'AST'
 
         # Dead code testing...
@@ -653,11 +668,41 @@ class Python2Parser(PythonParser):
         if tokens is None:
             return False
         lhs = rule[0]
+        n = len(tokens)
 
+        fn = self.reduce_check_table.get(lhs, None)
+        if fn:
+            if fn(self, lhs, n, rule, ast, tokens, first, last):
+                return True
+            pass
+        if rule == ("and", ("expr", "jmp_false", "expr", "\\e_come_from_opt")):
+            # If the instruction after the instructions forming the "and"  is an "YIELD_VALUE"
+            # then this is probably an "if" inside a comprehension.
+            if tokens[last] == "YIELD_VALUE":
+                # Note: We might also consider testing last+1 being "POP_TOP"
+                return True
+
+            # Test that jump_false jump somewhere beyond the end of the "and"
+            # it might not be exactly the end of the "and" because this and can
+            # be a part of a larger condition. Oddly in 2.7 there doesn't seem to be
+            # an optimization where the "and" jump_false is back to a loop.
+            jmp_false = ast[1]
+            if jmp_false[0] == "POP_JUMP_IF_FALSE":
+                while (first < last and isinstance(tokens[last].offset, str)):
+                    last -= 1
+                if jmp_false[0].attr < tokens[last].offset:
+                    return True
+
+            # Test that jmp_false jumps to the end of "and"
+            # or that it jumps to the same place as the end of "and"
+            jmp_false = ast[1][0]
+            jmp_target = jmp_false.offset + jmp_false.attr + 3
+            return not (jmp_target == tokens[last].offset or
+                        tokens[last].pattr == jmp_false.pattr)
         # Dead code testing...
         # if lhs == 'while1elsestmt':
         #     from trepan.api import debug; debug()
-        if (
+        elif (
             lhs in ("aug_assign1", "aug_assign2")
             and ast[0]
             and ast[0][0] in ("and", "or")
@@ -676,33 +721,6 @@ class Python2Parser(PythonParser):
         elif lhs in ("delete_subscript", "del_expr"):
             op = ast[0][0]
             return op.kind in ("and", "or")
-        elif lhs in ("tryelsestmt", "tryelsestmtl"):
-            # Check the end of the except handler that there isn't a jump from
-            # inside the except handler to the end. If that happens
-            # then this is a "try" with no "else".
-            except_handler = ast[3]
-            if except_handler == "except_handler":
-
-                come_from = except_handler[-1]
-                # We only care about the *first* come_from because that is the
-                # the innermost one. So if the "tryelse" is invalid (should be a "try")
-                # ti will be invalid here.
-                if come_from == "COME_FROM":
-                    first_come_from = except_handler[-1]
-                else:
-                    assert come_from == "come_froms"
-                    first_come_from = come_from[0]
-                leading_jump = except_handler[0]
-
-                # We really don't care that this is a jump per-se. But
-                # we could also check that this jumps to the end of the except if
-                # desired.
-                if isinstance(leading_jump, SyntaxTree):
-                    except_handler_first_offset = leading_jump.first_child().off2int()
-                else:
-                    except_handler_first_offset = leading_jump.off2int()
-                return first_come_from.attr > except_handler_first_offset
-
 
         return False
 

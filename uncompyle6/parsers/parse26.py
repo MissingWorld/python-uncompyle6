@@ -1,4 +1,4 @@
-#  Copyright (c) 2017-2019 Rocky Bernstein
+#  Copyright (c) 2017-2020 Rocky Bernstein
 """
 spark grammar differences over Python2 for Python 2.6.
 """
@@ -6,6 +6,7 @@ spark grammar differences over Python2 for Python 2.6.
 from uncompyle6.parser import PythonParserSingle
 from spark_parser import DEFAULT_DEBUG as PARSER_DEFAULT_DEBUG
 from uncompyle6.parsers.parse2 import Python2Parser
+from uncompyle6.parsers.reducecheck import (except_handler, tryelsestmt)
 
 class Python26Parser(Python2Parser):
 
@@ -24,7 +25,11 @@ class Python26Parser(Python2Parser):
         except_handler ::= JUMP_FORWARD COME_FROM except_stmts
                            come_froms_pop END_FINALLY come_froms
 
-        except_handler ::= JUMP_FORWARD COME_FROM except_stmts END_FINALLY
+        except_handler ::= JUMP_FORWARD COME_FROM except_stmts
+                           END_FINALLY
+
+        except_handler ::= JUMP_FORWARD COME_FROM except_stmts
+                           POP_TOP END_FINALLY
                            come_froms
 
         except_handler ::= jmp_abs COME_FROM except_stmts
@@ -32,6 +37,7 @@ class Python26Parser(Python2Parser):
 
         except_handler ::= jmp_abs COME_FROM except_stmts
                            END_FINALLY JUMP_FORWARD
+
 
         # Sometimes we don't put in COME_FROM to the next statement
         # like we do in 2.7. Perhaps we should?
@@ -87,8 +93,8 @@ class Python26Parser(Python2Parser):
 
         cf_jb_cf_pop ::= _come_froms JUMP_BACK come_froms POP_TOP
 
-        bp_come_from    ::= POP_BLOCK COME_FROM
-        jb_pb_come_from ::= JUMP_BACK bp_come_from
+        pb_come_from    ::= POP_BLOCK COME_FROM
+        jb_pb_come_from ::= JUMP_BACK pb_come_from
 
         _ifstmts_jump ::= c_stmts_opt JUMP_FORWARD COME_FROM POP_TOP
         _ifstmts_jump ::= c_stmts_opt JUMP_FORWARD come_froms POP_TOP COME_FROM
@@ -119,8 +125,8 @@ class Python26Parser(Python2Parser):
         ifelsestmtc ::= testexpr c_stmts_opt ja_cf_pop    else_suitec
 
         # Semantic actions want suite_stmts_opt to be at index 3
-        withstmt ::= expr setupwith SETUP_FINALLY suite_stmts_opt
-                     POP_BLOCK LOAD_CONST COME_FROM WITH_CLEANUP END_FINALLY
+        with        ::= expr setupwith SETUP_FINALLY suite_stmts_opt
+                        POP_BLOCK LOAD_CONST COME_FROM WITH_CLEANUP END_FINALLY
 
         # Semantic actions want store to be at index 2
         withasstmt ::= expr setupwithas store suite_stmts_opt
@@ -142,7 +148,7 @@ class Python26Parser(Python2Parser):
         while1stmt     ::= SETUP_LOOP l_stmts_opt CONTINUE _come_froms
 
         whilestmt      ::= SETUP_LOOP testexpr l_stmts_opt jb_pop POP_BLOCK _come_froms
-        whilestmt      ::= SETUP_LOOP testexpr l_stmts_opt jb_cf_pop bp_come_from
+        whilestmt      ::= SETUP_LOOP testexpr l_stmts_opt jb_cf_pop pb_come_from
         whilestmt      ::= SETUP_LOOP testexpr l_stmts_opt jb_cf_pop POP_BLOCK
         whilestmt      ::= SETUP_LOOP testexpr returns POP_BLOCK COME_FROM
 
@@ -169,6 +175,7 @@ class Python26Parser(Python2Parser):
         # Semantic actions want the else to be at position 3
         ifelsestmt     ::= testexpr_then c_stmts_opt jf_cf_pop else_suite come_froms
         ifelsestmt     ::= testexpr_then c_stmts_opt filler else_suitel come_froms POP_TOP
+        ifelsestmt     ::= testexpr c_stmts_opt jf_cf_pop else_suite
 
         # We have no jumps to jumps, so no "come_froms" but a single "COME_FROM"
         ifelsestmt     ::= testexpr      c_stmts_opt jf_cf_pop else_suite COME_FROM
@@ -231,7 +238,10 @@ class Python26Parser(Python2Parser):
 
         comp_for ::= SETUP_LOOP expr for_iter store comp_iter jb_pb_come_from
 
-        comp_body ::= gen_comp_body
+        comp_iter   ::= comp_if_not
+        comp_if_not ::= expr jmp_true comp_iter
+
+        comp_body   ::= gen_comp_body
 
         for_block ::= l_stmts_opt _come_froms POP_TOP JUMP_BACK
 
@@ -261,8 +271,8 @@ class Python26Parser(Python2Parser):
         '''
         ret_and      ::= expr jmp_false ret_expr_or_cond COME_FROM
         ret_or       ::= expr jmp_true ret_expr_or_cond COME_FROM
-        ret_cond     ::= expr jmp_false_then expr RETURN_END_IF POP_TOP ret_expr_or_cond
-        ret_cond     ::= expr jmp_false_then expr ret_expr_or_cond
+        if_exp_ret   ::= expr jmp_false_then expr RETURN_END_IF POP_TOP ret_expr_or_cond
+        if_exp_ret   ::= expr jmp_false_then expr ret_expr_or_cond
 
         return_if_stmt ::= ret_expr RETURN_END_IF POP_TOP
         return ::= ret_expr RETURN_VALUE POP_TOP
@@ -282,11 +292,11 @@ class Python26Parser(Python2Parser):
         kvlist ::= kvlist kv3
 
         # Note: preserve positions 0 2 and 4 for semantic actions
-        conditional_not    ::= expr jmp_true  expr jf_cf_pop expr COME_FROM
-        conditional        ::= expr jmp_false expr jf_cf_pop expr come_from_opt
-        conditional        ::= expr jmp_false expr ja_cf_pop expr
+        if_exp_not         ::= expr jmp_true  expr jf_cf_pop expr COME_FROM
+        if_exp             ::= expr jmp_false expr jf_cf_pop expr come_from_opt
+        if_exp             ::= expr jmp_false expr ja_cf_pop expr
 
-        expr               ::= conditional_not
+        expr               ::= if_exp_not
 
         and                ::= expr JUMP_IF_FALSE POP_TOP expr JUMP_IF_FALSE POP_TOP
 
@@ -310,27 +320,27 @@ class Python26Parser(Python2Parser):
         compare_chained2   ::= expr COMPARE_OP return_lambda
 
         return_if_lambda   ::= RETURN_END_IF_LAMBDA POP_TOP
-        stmt               ::= if_expr_lambda
-        stmt               ::= conditional_not_lambda
-        if_expr_lambda     ::= expr jmp_false_then expr return_if_lambda
+        stmt               ::= if_exp_lambda
+        stmt               ::= if_exp_not_lambda
+        if_exp_lambda      ::= expr jmp_false_then expr return_if_lambda
                                return_stmt_lambda LAMBDA_MARKER
-        conditional_not_lambda ::=
+        if_exp_not_lambda ::=
                                expr jmp_true_then expr return_if_lambda
                                return_stmt_lambda LAMBDA_MARKER
 
-        # if_expr_true are for conditions which always evaluate true
+        # if_exp_true are for conditions which always evaluate true
         # There is dead or non-optional remnants of the condition code though,
         # and we use that to match on to reconstruct the source more accurately
-        expr               ::= if_expr_true
-        if_expr_true       ::= expr jf_pop expr COME_FROM
+        expr               ::= if_exp_true
+        if_exp_true        ::= expr jf_pop expr COME_FROM
 
         # This comes from
         #   0 or max(5, 3) if 0 else 3
         # where there seems to be an additional COME_FROM at the
         # end. Not sure if this is appropriately named or
         # is the best way to handle
-        expr               ::= conditional_false
-        conditional_false  ::= conditional COME_FROM
+        expr               ::= if_exp_false
+        if_exp_false  ::= if_exp COME_FROM
 
         """
 
@@ -341,16 +351,30 @@ class Python26Parser(Python2Parser):
                 WITH_CLEANUP END_FINALLY
         """)
         super(Python26Parser, self).customize_grammar_rules(tokens, customize)
+        self.reduce_check_table = {
+            "except_handler": except_handler,
+            "tryelsestmt": tryelsestmt,
+            "tryelsestmtl": tryelsestmt,
+        }
+
+
         self.check_reduce['and'] = 'AST'
         self.check_reduce['assert_expr_and'] = 'AST'
+        self.check_reduce["except_handler"] = "tokens"
+        self.check_reduce["ifstmt"] = "tokens"
+        self.check_reduce["ifelsestmt"] = "AST"
+        self.check_reduce["forelselaststmtl"] = "tokens"
+        self.check_reduce["forelsestmt"] = "tokens"
         self.check_reduce['list_for'] = 'AST'
         self.check_reduce['try_except'] = 'tokens'
         self.check_reduce['tryelsestmt'] = 'AST'
+        self.check_reduce['tryelsestmtl'] = 'AST'
 
     def reduce_is_invalid(self, rule, ast, tokens, first, last):
         invalid = super(Python26Parser,
                         self).reduce_is_invalid(rule, ast,
                                                 tokens, first, last)
+        lhs = rule[0]
         if invalid or tokens is None:
             return invalid
         if rule in (
@@ -363,10 +387,10 @@ class Python26Parser(Python2Parser):
             if ast[1] is None:
                 return False
 
-            # For now, we won't let the 2nd 'expr' be a "conditional_not"
+            # For now, we won't let the 2nd 'expr' be a "if_exp_not"
             # However in < 2.6 where we don't have if/else expression it *can*
             # be.
-            if self.version >= 2.6 and ast[2][0] == 'conditional_not':
+            if self.version >= 2.6 and ast[2][0] == "if_exp_not":
                 return True
 
             test_index = last
@@ -382,6 +406,37 @@ class Python26Parser(Python2Parser):
 
             return not (jmp_target == tokens[test_index].offset or
                         tokens[last].pattr == jmp_false.pattr)
+
+        elif lhs in ("forelselaststmtl", "forelsestmt"):
+            # print("XXX", first, last)
+            # for t in range(first, last):
+            #     print(tokens[t])
+            # print("=" * 30)
+
+            # If the SETUP_LOOP jumps to the tokens[last] then
+            # this is a "for" not a "for else".
+
+            # However, in Python 2.2 and before there is a SET_LINENO
+            # instruction which might have gotten removed. So we need
+            # to account for that.  bytecode-1.4/anydbm.pyc exhibits
+            # this behavior.
+
+            # Also we need to use the setup_loop instruction (not opcode)
+            # since the operand can be a relative offset rather than
+            # an absolute offset.
+            setup_inst = self.insts[self.offset2inst_index[tokens[first].offset]]
+            if self.version <= 2.2 and tokens[last] == "COME_FROM":
+                last += 1
+            return tokens[last-1].off2int() > setup_inst.argval
+        elif rule == ("ifstmt", ("testexpr", "_ifstmts_jump")):
+            for i in range(last-1, last-4, -1):
+                t = tokens[i]
+                if t == "JUMP_FORWARD":
+                    return t.attr > tokens[min(last, len(tokens)-1)].off2int()
+                elif t not in ("POP_TOP", "COME_FROM"):
+                    break
+                pass
+            pass
         elif rule == (
                 'list_for',
                 ('expr', 'for_iter', 'store', 'list_iter',
@@ -389,7 +444,7 @@ class Python26Parser(Python2Parser):
             # The JUMP_ABSOLUTE has to be to the last POP_TOP or this is invalid
             ja_attr = ast[4].attr
             return tokens[last].offset != ja_attr
-        elif rule[0] == 'try_except':
+        elif lhs == 'try_except':
             # We need to distingush try_except from tryelsestmt and we do that
             # by checking the jump before the END_FINALLY
             # If we have:
@@ -406,12 +461,12 @@ class Python26Parser(Python2Parser):
                 last -= 1
             if (tokens[last] == 'COME_FROM'
                 and tokens[last-1] == 'END_FINALLY'
-                    and tokens[last-2] == 'POP_TOP'):
+                   and tokens[last-2] == 'POP_TOP'):
                 # A jump of 2 is a jump around POP_TOP, END_FINALLY which
                 # would indicate try/else rather than try
                 return (tokens[last-3].kind not in frozenset(('JUMP_FORWARD', 'RETURN_VALUE'))
                         or (tokens[last-3] == 'JUMP_FORWARD' and tokens[last-3].attr != 2))
-        elif rule[0] == 'tryelsestmt':
+        elif lhs == 'tryelsestmt':
 
             # We need to distingush try_except from tryelsestmt and we do that
             # by making sure that the jump before the except handler jumps to

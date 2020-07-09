@@ -1,4 +1,4 @@
-#  Copyright (c) 2015-2019 Rocky Bernstein
+#  Copyright (c) 2015-2020 Rocky Bernstein
 #  Copyright (c) 2005 by Dan Pascu <dan@windowmaker.org>
 #  Copyright (c) 2000-2002 by hartmut Goebel <h.goebel@crazy-compilers.com>
 #  Copyright (c) 1999 John Aycock
@@ -29,6 +29,18 @@ that a later phase can turn into a sequence of ASCII text.
 import re
 from uncompyle6.scanners.tok import Token
 from uncompyle6.parser import PythonParser, PythonParserSingle, nop_func
+from uncompyle6.parsers.reducecheck import (
+    and_check,
+    except_handler_else,
+    ifelsestmt,
+    ifstmt,
+    iflaststmt,
+    or_check,
+    testtrue,
+    tryelsestmtl3,
+    tryexcept,
+    while1stmt
+)
 from uncompyle6.parsers.treenode import SyntaxTree
 from spark_parser import DEFAULT_DEBUG as PARSER_DEFAULT_DEBUG
 from xdis import PYTHON3
@@ -62,6 +74,7 @@ class Python3Parser(PythonParser):
 
         jb_or_c ::= JUMP_BACK
         jb_or_c ::= CONTINUE
+        jb_cfs  ::= JUMP_BACK _come_froms
 
         stmt ::= set_comp_func
 
@@ -140,18 +153,24 @@ class Python3Parser(PythonParser):
         assert_expr_or ::= assert_expr jmp_true expr
         assert_expr_and ::= assert_expr jmp_false expr
 
-        ifstmt ::= testexpr _ifstmts_jump
+        ifstmt  ::= testexpr _ifstmts_jump
 
         testexpr ::= testfalse
         testexpr ::= testtrue
         testfalse ::= expr jmp_false
         testtrue ::= expr jmp_true
 
-        _ifstmts_jump ::= return_if_stmts
-        _ifstmts_jump ::= c_stmts_opt COME_FROM
+        _ifstmts_jump   ::= return_if_stmts
+        _ifstmts_jump   ::= stmts _come_froms
+        _ifstmts_jumpl  ::= c_stmts_opt come_froms
 
-        iflaststmt  ::= testexpr c_stmts_opt JUMP_ABSOLUTE
+        iflaststmt  ::= testexpr stmts_opt JUMP_ABSOLUTE
+        iflaststmt  ::= testexpr _ifstmts_jumpl
+
+        # ifstmts where we are in a loop
+        _ifstmts_jumpl     ::= _ifstmts_jump
         iflaststmtl ::= testexpr c_stmts_opt JUMP_BACK
+        iflaststmtl ::= testexpr _ifstmts_jumpl
 
         # These are used to keep parse tree indices the same
         jump_forward_else  ::= JUMP_FORWARD ELSE
@@ -161,16 +180,22 @@ class Python3Parser(PythonParser):
         # of missing "else" clauses. Therefore we include grammar
         # rules with and without ELSE.
 
-        ifelsestmt ::= testexpr c_stmts_opt JUMP_FORWARD
+        ifelsestmt ::= testexpr stmts_opt JUMP_FORWARD
                        else_suite opt_come_from_except
-        ifelsestmt ::= testexpr c_stmts_opt jump_forward_else
+        ifelsestmt ::= testexpr stmts_opt jump_forward_else
                        else_suite _come_froms
 
         # ifelsestmt ::= testexpr c_stmts_opt jump_forward_else
         #                pass  _come_froms
 
+        # FIXME: remove this
+        stmt         ::= ifelsestmtc
+
+        c_stmts      ::= ifelsestmtc
+
         ifelsestmtc ::= testexpr c_stmts_opt JUMP_ABSOLUTE else_suitec
         ifelsestmtc ::= testexpr c_stmts_opt jump_absolute_else else_suitec
+        ifelsestmtc ::= testexpr c_stmts_opt jump_forward_else else_suitec _come_froms
 
         # "if"/"else" statement that ends in a RETURN
         ifelsestmtr ::= testexpr return_if_stmts returns
@@ -192,6 +217,8 @@ class Python3Parser(PythonParser):
                            POP_BLOCK LOAD_CONST
                            COME_FROM_FINALLY suite_stmts_opt END_FINALLY
 
+        except_handler_else ::= except_handler
+
         except_handler ::= jmp_abs COME_FROM except_stmts
                            END_FINALLY
         except_handler ::= jmp_abs COME_FROM_EXCEPT except_stmts
@@ -204,8 +231,7 @@ class Python3Parser(PythonParser):
         except_handler ::= JUMP_FORWARD COME_FROM except_stmts
                            END_FINALLY COME_FROM_EXCEPT
 
-        except_stmts ::= except_stmts except_stmt
-        except_stmts ::= except_stmt
+        except_stmts ::= except_stmt+
 
         except_stmt ::= except_cond1 except_suite
         except_stmt ::= except_cond2 except_suite
@@ -244,18 +270,24 @@ class Python3Parser(PythonParser):
         jmp_abs ::= JUMP_ABSOLUTE
         jmp_abs ::= JUMP_BACK
 
-        withstmt ::= expr SETUP_WITH POP_TOP suite_stmts_opt
-                POP_BLOCK LOAD_CONST COME_FROM_WITH
-                WITH_CLEANUP END_FINALLY
+        with    ::= expr SETUP_WITH POP_TOP suite_stmts_opt
+                    POP_BLOCK LOAD_CONST COME_FROM_WITH
+                    WITH_CLEANUP END_FINALLY
 
         withasstmt ::= expr SETUP_WITH store suite_stmts_opt
                 POP_BLOCK LOAD_CONST COME_FROM_WITH
                 WITH_CLEANUP END_FINALLY
 
+        expr_jt     ::= expr jmp_true
+        expr_jitop  ::= expr JUMP_IF_TRUE_OR_POP
+
         ## FIXME: Right now we have erroneous jump targets
         ## This below is probably not correct when the COME_FROM is put in the right place
-        and ::= expr jmp_false expr COME_FROM
-        or  ::= expr jmp_true  expr COME_FROM
+        and  ::= expr jmp_false expr COME_FROM
+        or   ::= expr_jt  expr COME_FROM
+        or   ::= expr_jt expr
+        or   ::= expr_jitop expr COME_FROM
+        and  ::= expr JUMP_IF_FALSE_OR_POP expr COME_FROM
 
         # # something like the below is needed when the jump targets are fixed
         ## or  ::= expr JUMP_IF_TRUE_OR_POP COME_FROM expr
@@ -309,12 +341,10 @@ class Python3Parser(PythonParser):
         jmp_true  ::= POP_JUMP_IF_TRUE
 
         # FIXME: Common with 2.7
-        ret_and  ::= expr JUMP_IF_FALSE_OR_POP ret_expr_or_cond COME_FROM
-        ret_or   ::= expr JUMP_IF_TRUE_OR_POP ret_expr_or_cond COME_FROM
-        ret_cond ::= expr POP_JUMP_IF_FALSE expr RETURN_END_IF COME_FROM ret_expr_or_cond
+        ret_and    ::= expr JUMP_IF_FALSE_OR_POP ret_expr_or_cond COME_FROM
+        ret_or     ::= expr JUMP_IF_TRUE_OR_POP ret_expr_or_cond COME_FROM
+        if_exp_ret ::= expr POP_JUMP_IF_FALSE expr RETURN_END_IF COME_FROM ret_expr_or_cond
 
-        or   ::= expr JUMP_IF_TRUE_OR_POP expr COME_FROM
-        and  ::= expr JUMP_IF_FALSE_OR_POP expr COME_FROM
 
         # compare_chained1 is used exclusively in chained_compare
         compare_chained1 ::= expr DUP_TOP ROT_THREE COMPARE_OP JUMP_IF_FALSE_OR_POP
@@ -325,12 +355,12 @@ class Python3Parser(PythonParser):
 
     def p_stmt3(self, args):
         """
-        stmt               ::= if_expr_lambda
-        stmt               ::= conditional_not_lambda
-        if_expr_lambda     ::= expr jmp_false expr return_if_lambda
+        stmt               ::= if_exp_lambda
+
+        stmt               ::= if_exp_not_lambda
+        if_exp_lambda      ::= expr jmp_false expr return_if_lambda
                                return_stmt_lambda LAMBDA_MARKER
-        conditional_not_lambda
-                           ::= expr jmp_true expr return_if_lambda
+        if_exp_not_lambda  ::= expr jmp_true expr return_if_lambda
                                return_stmt_lambda LAMBDA_MARKER
 
         return_stmt_lambda ::= ret_expr RETURN_VALUE_LAMBDA
@@ -341,6 +371,42 @@ class Python3Parser(PythonParser):
 
         stmt ::= whileTruestmt
         ifelsestmt ::= testexpr c_stmts_opt JUMP_FORWARD else_suite _come_froms
+
+        # FIXME: go over this
+        _stmts ::= _stmts last_stmt
+        stmts ::= last_stmt
+        stmts_opt ::= stmts
+        last_stmt ::= iflaststmt
+        last_stmt ::= forelselaststmt
+        iflaststmt ::= testexpr last_stmt JUMP_ABSOLUTE
+        iflaststmt ::= testexpr stmts JUMP_ABSOLUTE
+
+        _iflaststmts_jump ::= stmts last_stmt
+        _ifstmts_jump ::= stmts_opt JUMP_FORWARD _come_froms
+
+        iflaststmt ::= testexpr _iflaststmts_jump
+        ifelsestmt ::= testexpr stmts_opt jump_absolute_else else_suite
+        ifelsestmt ::= testexpr stmts_opt jump_forward_else else_suite _come_froms
+        else_suite ::= stmts
+        else_suitel ::= stmts
+
+        # FIXME: remove this
+        _ifstmts_jump ::= c_stmts_opt JUMP_FORWARD _come_froms
+
+
+        # statements with continue and break
+        c_stmts ::= _stmts
+        c_stmts ::= _stmts lastc_stmt
+        c_stmts ::= lastc_stmt
+        c_stmts ::= continues
+
+        lastc_stmt ::= iflaststmtl
+        lastc_stmt ::= forelselaststmt
+        lastc_stmt ::= ifelsestmtc
+
+        # Statements in a loop
+        lstmt              ::= stmt
+        l_stmts            ::= lstmt+
         """
 
     def p_loop_stmt3(self, args):
@@ -373,10 +439,11 @@ class Python3Parser(PythonParser):
         while1elsestmt    ::= SETUP_LOOP          l_stmts     JUMP_BACK
                               else_suitel
 
-        whileelsestmt     ::= SETUP_LOOP testexpr l_stmts_opt JUMP_BACK POP_BLOCK
+        whileelsestmt     ::= SETUP_LOOP testexpr l_stmts_opt jb_cfs POP_BLOCK
                               else_suitel COME_FROM_LOOP
 
-        whileelsestmt2     ::= SETUP_LOOP testexpr l_stmts_opt  JUMP_BACK POP_BLOCK
+
+        whileelsestmt2    ::= SETUP_LOOP testexpr l_stmts_opt  JUMP_BACK POP_BLOCK
                               else_suitel JUMP_BACK COME_FROM_LOOP
 
         whileTruestmt     ::= SETUP_LOOP l_stmts_opt          JUMP_BACK POP_BLOCK
@@ -408,18 +475,18 @@ class Python3Parser(PythonParser):
     def p_expr3(self, args):
         """
         expr           ::= LOAD_STR
-        expr           ::= conditionalnot
-        conditionalnot ::= expr jmp_true  expr jump_forward_else expr COME_FROM
+        expr           ::= if_exp_not
+        if_exp_not     ::= expr jmp_true  expr jump_forward_else expr COME_FROM
 
         # a JUMP_FORWARD to another JUMP_FORWARD can get turned into
         # a JUMP_ABSOLUTE with no COME_FROM
-        conditional    ::= expr jmp_false expr jump_absolute_else expr
+        if_exp         ::= expr jmp_false expr jump_absolute_else expr
 
-        # if_expr_true are for conditions which always evaluate true
+        # if_exp_true are for conditions which always evaluate true
         # There is dead or non-optional remnants of the condition code though,
         # and we use that to match on to reconstruct the source more accurately
-        expr           ::= if_expr_true
-        if_expr_true   ::= expr JUMP_FORWARD expr COME_FROM
+        expr           ::= if_exp_true
+        if_exp_true    ::= expr JUMP_FORWARD expr COME_FROM
         """
 
     @staticmethod
@@ -612,6 +679,7 @@ class Python3Parser(PythonParser):
                 "RAISE",
                 "SETUP",
                 "UNPACK",
+                "WITH",
             )
         )
 
@@ -644,12 +712,11 @@ class Python3Parser(PythonParser):
               stmt ::= assign2_pypy
               assign3_pypy       ::= expr expr expr store store store
               assign2_pypy       ::= expr expr store store
-              stmt               ::= if_expr_lambda
-              stmt               ::= conditional_not_lambda
+              stmt               ::= if_exp_lambda
+              stmt               ::= if_exp_not_lambda
               if_expr_lambda     ::= expr jmp_false expr return_if_lambda
                                      return_lambda LAMBDA_MARKER
-              conditional_not_lambda
-                                 ::= expr jmp_true expr return_if_lambda
+              if_exp_not_lambda  ::= expr jmp_true expr return_if_lambda
                                      return_lambda LAMBDA_MARKER
               """,
                 nop_func,
@@ -835,11 +902,8 @@ class Python3Parser(PythonParser):
                      dict_comp    ::= LOAD_DICTCOMP LOAD_STR MAKE_FUNCTION_0 expr
                                       GET_ITER CALL_FUNCTION_1
                     classdefdeco1 ::= expr classdefdeco2 CALL_FUNCTION_1
+                    classdefdeco1 ::= expr classdefdeco1 CALL_FUNCTION_1
                     """
-                    if self.version < 3.5:
-                        rule += """
-                        classdefdeco1 ::= expr classdefdeco1 CALL_FUNCTION_1
-                        """
                     self.addRule(rule, nop_func)
 
                 self.custom_classfunc_rule(
@@ -893,7 +957,7 @@ class Python3Parser(PythonParser):
                 self.addRule(
                     """
                     expr      ::= get_iter
-                    attribute ::= expr GET_ITER
+                    get_iter ::= expr GET_ITER
                     """,
                     nop_func,
                 )
@@ -1014,7 +1078,9 @@ class Python3Parser(PythonParser):
                     self.add_make_function_rule(rule_pat, opname, token.attr, customize)
 
                     if has_get_iter_call_function1:
-                        if self.is_pypy or (i >= j and tokens[i - j] == "LOAD_LISTCOMP"):
+                        if self.is_pypy or (
+                            i >= j and tokens[i - j] == "LOAD_LISTCOMP"
+                        ):
                             # In the tokens we saw:
                             #   LOAD_LISTCOMP LOAD_CONST MAKE_FUNCTION (>= 3.3) or
                             #   LOAD_LISTCOMP MAKE_FUNCTION (< 3.3) or
@@ -1037,7 +1103,9 @@ class Python3Parser(PythonParser):
                             self.add_make_function_rule(
                                 rule_pat, opname, token.attr, customize
                             )
-                        if self.is_pypy or (i >= j and tokens[i - j] == "LOAD_DICTCOMP"):
+                        if self.is_pypy or (
+                            i >= j and tokens[i - j] == "LOAD_DICTCOMP"
+                        ):
                             self.add_unique_rule(
                                 "dict_comp ::= %sload_closure LOAD_DICTCOMP %s "
                                 "expr GET_ITER CALL_FUNCTION_1"
@@ -1055,11 +1123,14 @@ class Python3Parser(PythonParser):
                 # Note order of kwargs and pos args changed between 3.3-3.4
                 if self.version <= 3.2:
                     if annotate_args > 0:
-                        rule = "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure LOAD_CODE %s" % (
-                            kwargs_str,
-                            "pos_arg " * args_pos,
-                            "annotate_arg " * (annotate_args - 1),
-                            opname,
+                        rule = (
+                            "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure LOAD_CODE %s"
+                            % (
+                                kwargs_str,
+                                "pos_arg " * args_pos,
+                                "annotate_arg " * (annotate_args - 1),
+                                opname,
+                            )
                         )
                     else:
                         rule = "mkfunc ::= %s%sload_closure LOAD_CODE %s" % (
@@ -1069,11 +1140,14 @@ class Python3Parser(PythonParser):
                         )
                 elif self.version == 3.3:
                     if annotate_args > 0:
-                        rule = "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure LOAD_CODE LOAD_STR %s" % (
-                            kwargs_str,
-                            "pos_arg " * args_pos,
-                            "annotate_arg " * (annotate_args - 1),
-                            opname,
+                        rule = (
+                            "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure LOAD_CODE LOAD_STR %s"
+                            % (
+                                kwargs_str,
+                                "pos_arg " * args_pos,
+                                "annotate_arg " * (annotate_args - 1),
+                                opname,
+                            )
                         )
                     else:
                         rule = "mkfunc ::= %s%sload_closure LOAD_CODE LOAD_STR %s" % (
@@ -1089,12 +1163,15 @@ class Python3Parser(PythonParser):
                         load_op = "LOAD_CONST"
 
                     if annotate_args > 0:
-                        rule = "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure %s %s %s" % (
-                            "pos_arg " * args_pos,
-                            kwargs_str,
-                            "annotate_arg " * (annotate_args - 1),
-                            load_op,
-                            opname,
+                        rule = (
+                            "mkfunc_annotate ::= %s%s%sannotate_tuple load_closure %s %s"
+                            % (
+                                "pos_arg " * args_pos,
+                                kwargs_str,
+                                "annotate_arg " * (annotate_args - 1),
+                                load_op,
+                                opname,
+                            )
                         )
                     else:
                         rule = "mkfunc ::= %s%s load_closure LOAD_CODE %s %s" % (
@@ -1182,7 +1259,9 @@ class Python3Parser(PythonParser):
                         self.add_make_function_rule(
                             rule_pat, opname, token.attr, customize
                         )
-                        if self.is_pypy or (i >= 2 and tokens[i - 2] == "LOAD_LISTCOMP"):
+                        if self.is_pypy or (
+                            i >= 2 and tokens[i - 2] == "LOAD_LISTCOMP"
+                        ):
                             if self.version >= 3.6:
                                 # 3.6+ sometimes bundles all of the
                                 # 'exprs' in the rule above into a
@@ -1422,22 +1501,21 @@ class Python3Parser(PythonParser):
                     """
                     try_except     ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
                                        except_handler opt_come_from_except
-
-                    tryelsestmt    ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
-                                       except_handler else_suite come_from_except_clauses
-
-                    tryelsestmt    ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
-                                       except_handler else_suite come_froms
+                    try_except     ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
+                                       except_handler opt_come_from_except
 
                     tryelsestmtl   ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
                                        except_handler else_suitel come_from_except_clauses
 
                     stmt             ::= tryelsestmtl3
+
                     tryelsestmtl3    ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
-                                         except_handler COME_FROM else_suitel
+                                         except_handler_else COME_FROM else_suitel
                                          opt_come_from_except
+                    tryelsestmt      ::= SETUP_EXCEPT suite_stmts_opt POP_BLOCK
+                                         except_handler_else else_suite come_froms
                     """,
-                    nop_func
+                    nop_func,
                 )
 
                 custom_ops_processed.add(opname)
@@ -1457,24 +1535,59 @@ class Python3Parser(PythonParser):
                 pass
             pass
 
+        # FIXME: Put more in this table
+        self.reduce_check_table = {
+            "except_handler_else": except_handler_else,
+            # "ifstmt": ifstmt,
+            "ifstmtl": ifstmt,
+            "ifelsestmtc": ifelsestmt,
+            "ifelsestmt": ifelsestmt,
+            "or": or_check,
+            "testtrue": testtrue,
+            "tryelsestmtl3": tryelsestmtl3,
+            "try_except": tryexcept,
+        }
+
+        if self.version == 3.6:
+            self.reduce_check_table["and"] =  and_check
+            self.check_reduce["and"] = "AST"
+
+        self.check_reduce["annotate_tuple"] = "noAST"
         self.check_reduce["aug_assign1"] = "AST"
         self.check_reduce["aug_assign2"] = "AST"
-        self.check_reduce["while1stmt"] = "noAST"
-        self.check_reduce["while1elsestmt"] = "noAST"
+        self.check_reduce["except_handler_else"] = "tokens"
         self.check_reduce["ifelsestmt"] = "AST"
-        self.check_reduce["annotate_tuple"] = "noAST"
+        self.check_reduce["ifelsestmtc"] = "AST"
+        self.check_reduce["ifstmt"] = "AST"
+        self.check_reduce["ifstmtl"] = "AST"
+        if self.version == 3.6:
+            self.reduce_check_table["iflaststmtl"] = iflaststmt
+            self.check_reduce["iflaststmt"] = "AST"
+            self.check_reduce["iflaststmtl"] = "AST"
+        self.check_reduce["or"] = "AST"
+        self.check_reduce["testtrue"] = "tokens"
         if not PYTHON3:
             self.check_reduce["kwarg"] = "noAST"
-        if self.version < 3.6:
+        if self.version < 3.6 and not self.is_pypy:
             # 3.6+ can remove a JUMP_FORWARD which messes up our testing here
+            # Pypy we need to go over in better detail
             self.check_reduce["try_except"] = "AST"
 
-        # FIXME: remove parser errors caused by the below
-        # self.check_reduce['while1elsestmt'] = 'noAST'
+        self.check_reduce["tryelsestmtl3"] = "AST"
+        self.check_reduce["while1stmt"] = "noAST"
+        self.check_reduce["while1elsestmt"] = "noAST"
         return
 
     def reduce_is_invalid(self, rule, ast, tokens, first, last):
         lhs = rule[0]
+        n = len(tokens)
+        last = min(last, n-1)
+        fn = self.reduce_check_table.get(lhs, None)
+        if fn:
+            if fn(self, lhs, n, rule, ast, tokens, first, last):
+                return True
+            pass
+        # FIXME: put more in reduce_check_table
         if lhs in ("aug_assign1", "aug_assign2") and ast[0][0] == "and":
             return True
         elif lhs == "annotate_tuple":
@@ -1482,6 +1595,69 @@ class Python3Parser(PythonParser):
         elif lhs == "kwarg":
             arg = tokens[first].attr
             return not (isinstance(arg, str) or isinstance(arg, unicode))
+        elif lhs in ("iflaststmt", "iflaststmtl") and self.version == 3.6:
+            return ifstmt(self, lhs, n, rule, ast, tokens, first, last)
+        elif rule == ("ifstmt", ("testexpr", "_ifstmts_jump")):
+            # FIXME: go over what's up with 3.0. Evetually I'd like to remove RETURN_END_IF
+            if self.version <= 3.0 or tokens[last] == "RETURN_END_IF":
+                return False
+            if ifstmt(self, lhs, n, rule, ast, tokens, first, last):
+                return True
+            # FIXME: do we need the below or is it covered by "ifstmt" above?
+            condition_jump = ast[0].last_child()
+            if condition_jump.kind.startswith("POP_JUMP_IF"):
+                condition_jump2 = tokens[min(last - 1, len(tokens) - 1)]
+                # If there are two *distinct* condition jumps, they should not jump to the
+                # same place. Otherwise we have some sort of "and"/"or".
+                if condition_jump2.kind.startswith("POP_JUMP_IF") and condition_jump != condition_jump2:
+                    return condition_jump.attr == condition_jump2.attr
+
+                if tokens[last] == "COME_FROM" and tokens[last].off2int() != condition_jump.attr:
+                    return False
+
+
+                # if condition_jump.attr < condition_jump2.off2int():
+                #     print("XXX", first, last)
+                #     for t in range(first, last): print(tokens[t])
+                #     from trepan.api import debug; debug()
+                return condition_jump.attr < condition_jump2.off2int()
+            return False
+        elif rule == ("ifstmt", ("testexpr", "\\e__ifstmts_jump")):
+            # I am not sure what to check.
+            # Probably needs fixing elsewhere
+            return True
+        elif lhs == "ifelsestmt" and rule[1][2] == "jump_forward_else":
+            last = min(last, len(tokens) - 1)
+            if tokens[last].off2int() == -1:
+                last -= 1
+            jump_forward_else = ast[2]
+            return (
+                tokens[first].off2int()
+                <= jump_forward_else[0].attr
+                < tokens[last].off2int()
+            )
+        elif lhs == "while1stmt":
+
+            if while1stmt(self, lhs, n, rule, ast, tokens, first, last):
+                return True
+
+            if self.version == 3.0:
+                return False
+
+            if 0 <= last < len(tokens) and tokens[last] in (
+                "COME_FROM_LOOP",
+                "JUMP_BACK",
+            ):
+                # jump_back should be right before COME_FROM_LOOP?
+                last += 1
+            while last < len(tokens) and isinstance(tokens[last].offset, str):
+                last += 1
+            if last < len(tokens):
+                offset = tokens[last].offset
+                assert tokens[first] == "SETUP_LOOP"
+                if offset != tokens[first].attr:
+                    return True
+            return False
         elif lhs == "while1elsestmt":
 
             n = len(tokens)
@@ -1508,72 +1684,6 @@ class Python3Parser(PythonParser):
                 return False
             # 3.8+ Doesn't have SETUP_LOOP
             return self.version < 3.8 and tokens[first].attr > tokens[last].offset
-
-        elif rule == (
-            "try_except",
-            (
-                "SETUP_EXCEPT",
-                "suite_stmts_opt",
-                "POP_BLOCK",
-                "except_handler",
-                "opt_come_from_except",
-            ),
-        ):
-            come_from_except = ast[-1]
-            if come_from_except[0] == "COME_FROM":
-                # There should be at last two COME_FROMs, one from an
-                # exception handler and one from the try. Otherwise
-                # we have a try/else.
-                return True
-            pass
-        elif lhs == "while1stmt":
-
-            # If there is a fall through to the COME_FROM_LOOP, then this is
-            # not a while 1. So the instruction before should either be a
-            # JUMP_BACK or the instruction before should not be the target of a
-            # jump. (Well that last clause i not quite right; that target could be
-            # from dead code. Ugh. We need a more uniform control flow analysis.)
-            if last == len(tokens) or tokens[last - 1] == "COME_FROM_LOOP":
-                cfl = last - 1
-            else:
-                cfl = last
-            assert tokens[cfl] == "COME_FROM_LOOP"
-
-            for i in range(cfl - 1, first, -1):
-                if tokens[i] != "POP_BLOCK":
-                    break
-            if tokens[i].kind not in ("JUMP_BACK", "RETURN_VALUE", "BREAK_LOOP"):
-                if not tokens[i].kind.startswith("COME_FROM"):
-                    return True
-
-            # Check that the SETUP_LOOP jumps to the offset after the
-            # COME_FROM_LOOP
-
-            # Python 3.0 has additional:
-            #     JUMP_FORWARD here
-            #     COME_FROM
-            #     POP_TOP
-            #     COME_FROM
-            #  here:
-            #     (target of SETUP_LOOP)
-            # We won't check this.
-            if self.version == 3.0:
-                return False
-
-            if 0 <= last < len(tokens) and tokens[last] in (
-                "COME_FROM_LOOP",
-                "JUMP_BACK",
-            ):
-                # jump_back should be right before COME_FROM_LOOP?
-                last += 1
-            while last < len(tokens) and isinstance(tokens[last].offset, str):
-                last += 1
-            if last < len(tokens):
-                offset = tokens[last].offset
-                assert tokens[first] == "SETUP_LOOP"
-                if offset != tokens[first].attr:
-                    return True
-            return False
         elif rule == (
             "ifelsestmt",
             (

@@ -1,4 +1,4 @@
-#  Copyright (c) 2018-2019 by Rocky Bernstein
+#  Copyright (c) 2018-2020 by Rocky Bernstein
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -18,10 +18,14 @@
 
 from uncompyle6.semantics.consts import TABLE_DIRECT
 
-from xdis.code import iscode
+from xdis import co_flags_is_async, iscode
 from uncompyle6.scanner import Code
-from uncompyle6.semantics.helper import gen_function_parens_adjust
-from uncompyle6.semantics.make_function import make_function3_annotate
+from uncompyle6.semantics.helper import (
+    find_code_node,
+    gen_function_parens_adjust,
+)
+
+from uncompyle6.semantics.make_function3 import make_function3_annotate
 from uncompyle6.semantics.customize35 import customize_for_version35
 from uncompyle6.semantics.customize36 import customize_for_version36
 from uncompyle6.semantics.customize37 import customize_for_version37
@@ -32,7 +36,7 @@ def customize_for_version3(self, version):
     TABLE_DIRECT.update(
         {
             "comp_for": (" for %c in %c", (2, "store"), (0, "expr")),
-            "conditionalnot": (
+            "if_exp_not": (
                 "%c if not %c else %c",
                 (2, "expr"),
                 (0, "expr"),
@@ -47,13 +51,34 @@ def customize_for_version3(self, version):
             "import_cont": (", %c", 2),
             "kwarg": ("%[0]{attr}=%c", 1),
             "raise_stmt2": ("%|raise %c from %c\n", 0, 1),
+            "tf_tryelsestmtl3": ( '%c%-%c%|else:\n%+%c', 1, 3, 5 ),
             "store_locals": ("%|# inspect.currentframe().f_locals = __locals__\n",),
-            "withstmt": ("%|with %c:\n%+%c%-", 0, 3),
-            "withasstmt": ("%|with %c as %c:\n%+%c%-", 0, 2, 3),
+            "with": ("%|with %c:\n%+%c%-", 0, 3),
+            "withasstmt": ("%|with %c as (%c):\n%+%c%-", 0, 2, 3),
         }
     )
 
     assert version >= 3.0
+
+    # In 2.5+ and 3.0+ "except" handlers and the "finally" can appear in one
+    # "try" statement. So the below has the effect of combining the
+    # "tryfinally" with statement with the "try_except" statement.
+    # FIXME: something doesn't smell right, since the semantics
+    # are different. See test_fileio.py for an example that shows this.
+    def tryfinallystmt(node):
+        suite_stmts = node[1][0]
+        if len(suite_stmts) == 1 and suite_stmts[0] == 'stmt':
+            stmt = suite_stmts[0]
+            try_something = stmt[0]
+            if try_something == "try_except":
+                try_something.kind = "tf_try_except"
+            if try_something.kind.startswith("tryelsestmt"):
+                if try_something == "tryelsestmtl3":
+                    try_something.kind = 'tf_tryelsestmtl3'
+                else:
+                    try_something.kind = 'tf_tryelsestmt'
+        self.default(node)
+    self.n_tryfinallystmt = tryfinallystmt
 
     def listcomp_closure3(node):
         """List comprehensions in Python 3 when handled as a closure.
@@ -62,7 +87,9 @@ def customize_for_version3(self, version):
         p = self.prec
         self.prec = 27
 
-        code = Code(node[1].attr, self.scanner, self.currentclass)
+        code_obj = node[1].attr
+        assert iscode(code_obj)
+        code = Code(code_obj, self.scanner, self.currentclass)
         ast = self.build_ast(code._tokens, code._customize)
         self.customize(code._customize)
 
@@ -116,7 +143,10 @@ def customize_for_version3(self, version):
             # Find the list comprehension body. It is the inner-most
             # node that is not list_.. .
             while n == "list_iter":
-                n = n[0]  # recurse one step
+
+                # recurse one step
+                n = n[0]
+
                 if n == "list_for":
                     stores.append(n[2])
                     n = n[3]
@@ -139,13 +169,29 @@ def customize_for_version3(self, version):
                         list_ifs.append([1])
                     n = n[2]
                     pass
+                elif n == "list_if37":
+                    list_ifs.append(n)
+                    n = n[-1]
+                    pass
+                elif n == "list_afor":
+                    collections.append(n[0][0])
+                    n = n[1]
+                    stores.append(n[1][0])
+                    n = n[3]
                 pass
 
             assert n == "lc_body", ast
+
             self.preorder(n[0])
 
         # FIXME: add indentation around "for"'s and "in"'s
+        n_colls = len(collections)
         for i, store in enumerate(stores):
+            if i >= n_colls:
+                break
+            if collections[i] == "LOAD_DEREF"  and co_flags_is_async(code_obj.co_flags):
+                self.write(" async")
+                pass
             self.write(" for ")
             self.preorder(store)
             self.write(" in ")
@@ -158,6 +204,11 @@ def customize_for_version3(self, version):
     self.listcomp_closure3 = listcomp_closure3
 
     def n_classdef3(node):
+        """Handle "classdef" nonterminal for 3.0 >= version 3.0 <= 3.5
+        """
+
+        assert 3.0 <= self.version <= 3.5
+
         # class definition ('class X(A,B,C):')
         cclass = self.currentclass
 
@@ -169,34 +220,15 @@ def customize_for_version3(self, version):
         # * subclass_code - the code for the subclass body
         subclass_info = None
         if node == "classdefdeco2":
-            if self.version >= 3.6:
-                class_name = node[1][1].attr
-            elif self.version <= 3.3:
+            if self.version <= 3.3:
                 class_name = node[2][0].attr
             else:
                 class_name = node[1][2].attr
             build_class = node
         else:
             build_class = node[0]
-            if self.version >= 3.6:
-                if build_class == "build_class_kw":
-                    mkfunc = build_class[1]
-                    assert mkfunc == "mkfunc"
-                    subclass_info = build_class
-                    if hasattr(mkfunc[0], "attr") and iscode(mkfunc[0].attr):
-                        subclass_code = mkfunc[0].attr
-                    else:
-                        assert mkfunc[0] == "load_closure"
-                        subclass_code = mkfunc[1].attr
-                        assert iscode(subclass_code)
-                if build_class[1][0] == "load_closure":
-                    code_node = build_class[1][1]
-                else:
-                    code_node = build_class[1][0]
-                class_name = code_node.attr.co_name
-            else:
-                class_name = node[1][0].attr
-                build_class = node[0]
+            class_name = node[1][0].attr
+            build_class = node[0]
 
         assert "mkfunc" == build_class[1]
         mkfunc = build_class[1]
@@ -228,10 +260,10 @@ def customize_for_version3(self, version):
                 # Python 3.3 classes with closures work like this.
                 # Note have to test before 3.2 case because
                 # index -2 also has an attr.
-                subclass_code = load_closure[-3].attr
+                subclass_code = find_code_node(load_closure, -3).attr
             elif hasattr(load_closure[-2], "attr"):
                 # Python 3.2 works like this
-                subclass_code = load_closure[-2].attr
+                subclass_code = find_code_node(load_closure, -2).attr
             else:
                 raise "Internal Error n_classdef: cannot find class body"
             if hasattr(build_class[3], "__len__"):
@@ -241,9 +273,6 @@ def customize_for_version3(self, version):
                 subclass_info = build_class[2]
             else:
                 raise "Internal Error n_classdef: cannot superclass name"
-        elif self.version >= 3.6 and node == "classdefdeco2":
-            subclass_info = node
-            subclass_code = build_class[1][0].attr
         elif not subclass_info:
             if mkfunc[0] in ("no_kwargs", "kwargs"):
                 subclass_code = mkfunc[1].attr
@@ -433,7 +462,7 @@ def customize_for_version3(self, version):
             "tryelsestmtl3": (
                 "%|try:\n%+%c%-%c%|else:\n%+%c%-",
                 (1, "suite_stmts_opt"),
-                (3, "except_handler"),
+                3, # "except_handler_else" or "except_handler"
                 (5, "else_suitel"),
             ),
             "LOAD_CLASSDEREF": ("%{pattr}",),

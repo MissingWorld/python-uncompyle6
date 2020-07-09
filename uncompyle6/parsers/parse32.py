@@ -17,7 +17,7 @@ class Python32Parser(Python3Parser):
 
     def p_32to35(self, args):
         """
-        conditional ::= expr jmp_false expr jump_forward_else expr COME_FROM
+        if_exp            ::= expr jmp_false expr jump_forward_else expr COME_FROM
 
         # compare_chained2 is used in a "chained_compare": x <= y <= z
         # used exclusively in compare_chained
@@ -46,8 +46,10 @@ class Python32Parser(Python3Parser):
         # Python 3.2+ has more loop optimization that removes
         # JUMP_FORWARD in some cases, and hence we also don't
         # see COME_FROM
-        _ifstmts_jump ::= c_stmts_opt
-        _ifstmts_jump ::= c_stmts_opt JUMP_FORWARD _come_froms
+        _ifstmts_jump ::= stmts_opt
+        _ifstmts_jump ::= stmts_opt JUMP_FORWARD _come_froms
+        _ifstmts_jumpl ::= c_stmts_opt
+        _ifstmts_jumpl ::= c_stmts_opt JUMP_FORWARD _come_froms
 
         kv3       ::= expr expr STORE_MAP
         """

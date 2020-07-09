@@ -1,3 +1,206 @@
+3.7.2: 2020-6-27
+================
+
+* Use newer xdis
+* Docstrings (again) which were broken again on earlier Python
+* Fix 2.6 and 2.7 decompilation bug in handling "list if" comprehensions
+
+
+
+3.7.1: 2020-6-12 Fleetwood66
+====================================================
+
+Released to pick up new xdis version which has fixes to read bytestings better on 3.x
+
+* Handle 3.7+ "else" branch removal adAs seen in `_cmp()` of `python3.8/distutils/version.py` with optimization `-O2`
+* 3.6+ "with" and "with .. as" grammar improvements
+* ast-check for "for" loop was missing some grammar rules
+
+3.7.0: 2020-5-19 Primidi 1st Prairial - Alfalfa - HF
+====================================================
+
+The main impetus for this release is to pull in the recent changes from xdis.
+We simplify imports using xdis 4.6.0.
+
+There were some bugfixes to Python 3.4-3.8. See the ChangeLog for details
+
+
+3.6.7: 2020-4-27 xdis again
+===========================
+
+More upheaval in xdis which we need to track here.
+
+3.6.6: 2020-4-20 Love in the time of Cholera
+============================================
+
+The main reason for this release is an incompatablity bump in xdis which handles
+3.7 SipHash better.
+
+* Go over "yield" as an expression precidence
+* Some small alignment with code in decompyle3 for "or" and "and" was done
+
+
+3.6.5: 2020-4-1 April Fool
+==========================
+
+Back port some of the changes in decompile3 here which mostly helps 3.7 and 3.8 decompilation, although this may also help 3.6ish versions too.
+
+- Handle nested `async for in for...`  and better async comprehension detection via `xdis`.  Still more work is needed.
+- include token number in listings when `-g` and there is a parser error
+- remove unneeded `Makefile`s now that remake 4.3+1.5dbg is a thing that has `-c`
+- Bug in finding annotations in functions with docstrings
+- Fix bug found by 2.4 sre_parse.py testing
+- Fix `transform` module's  `ifelseif` bugs
+- Fix bug in 3.0 name module detection
+- Fix docstring detection
+
+3.6.4: 2020-2-9 Plateau
+=======================
+
+The main focus in this release was fix some of the more glaring problems creapt in from the last release due to that refactor.
+
+`uncompyle6` code is at a plateau where what is most needed is a code refactoring. In doing this, until everything refactored and replaced, decomplation may get worse.
+Therefore, this release largely serves as a checkpoint before more major upheaval.
+
+The upheaval, in  started last release, I believe the pinnicle was around c90ff51 which wasn't a release. I suppose I should tag that.
+
+After c90ff5, I started down the road of redoing control flow in a more comprehensible, debuggable, and scalable way. See [The Control Flow Mess](https://github.com/rocky/python-uncompyle6/wiki/The-Control-Flow-Mess)
+
+The bulk of the refactoring going on in the [decompyle3](https://github.com/rocky/python-decompil3) project, but I try to trickle down the changes.
+
+It is tricky because the changes are large and I have to figure decompose things so that little testable pieces can be done. And there is also the problem that what is in decompyle3 is incomplete as well.
+
+Other than control flow, another change that will probably happen in the next release is to redo the grammar for lambda expressions. Right now, we treat them as Python statements, you know, things with compound statements in them. But lambda aren't that. And so there is hackery to paper over difference making a statement out of an expression the wrong thing to do. For example, a return of an "and" expression can be expressed as nested "if" statements with return inside them, but the "if" variant of the bytecode is not valid in a lambda.
+
+In the decompyle3 code, I've gone down the road making the grammar goal symbol be an expression. This also offers the opportunity to split the grammar making parsing inside lambda not only more reliable because the wrong choices don't exist, but also simpler and faster because all those rules just need don't need to exist in parsing.
+
+I cringe in thinking about how the code has lived for so long without noticing such a simple stupidity, and lapse of sufficient thought.
+
+Some stats from testing. The below give numbers of decompiled tests from Python's test suite which succesfully ran
+
+```
+   Version  test-suites passing
+   -------  -------------------
+   2.4.6     243
+   2.5.6     265
+   2.6.9     305
+   3.3.7     300
+   3.4.10    304
+   3.5.9     260
+   3.6.10    236
+   3.7.6     306
+   3.8.1     114
+```
+
+Decompiled bytecode files distributed with Python (syntax check only):
+
+```
+2.7.17  647 files:   0 failed
+3.2.6   900 files:   0 failed
+3.3.7  1256 files:   0 failed
+3.4.10  800 files:   0 failed
+3.5.9   900 files:   0 failed
+3.6.10 1300 files:  28 failed
+```
+
+
+3.6.3: 2020-1-26 Martin and Susanne
+===================================
+
+Of late, every release fixes major gaps and embarrassments of the last release....
+
+And in some cases, like this one, exposes lacuna and rot.
+
+I now have [control] flow under control, even if it isn't the most optimal way.
+
+I now have greatly expanded automated testing.
+
+On the most recent Python versions I regularly decompile thousands of Python programs that are distributed with Python.  when it is possible, I then decompile Python's standard test suite distributed with Python and run the decompiled source code which basically checks itself. This amounts to about 250 test programs per version. This is in addition to the 3 CI testing services which do different things.
+
+Does this mean the decompiler works perfectly? No. There are still a dozen or so failing programs, although the actual number of bugs is probably smaller though.
+
+However, in perparation of a more major refactoring of the parser grammar, this release was born.
+
+In many cases, decompilation is better. But there are some cases where decompilation has gotten worse. For lack of time (and interest) 3.0 bytecode suffered a hit. Possibly some code in the 3.x range did too. In time and with cleaner refactored code, this will come back.
+
+Commit c90ff51 was a local maxiumum before, I started reworking the grammar to separate productions that were specific to loops versus those that are not in loops.
+In the middle of that I added another grammar simplication to remove singleton productions of the form `sstmts-> stmts`. These were always was a bit ugly, and complicated output.
+
+At any rate if decompilation fails, you can try c90ff51. Or another decompiler. `unpyc37` is pretty good for 3.7. wibiti `uncompyle2` is great for 2.7. `pycdc` is mediocre for Python before 3.5 or so, and not that good for the most recent Python. Geerally these programs will give some sort of answer even if it isn't correct.
+
+decompyle3 isn't that good for 3.7 and worse for 3.8, but right now it does things no other Python decompiler like `unpyc37` or `pycdc` does. For example, `decompyle3` handles variable annotations. As always, the issue trackers for the various programs will give you a sense for what needs to be done. For now, I've given up on reporting issues in the other decompilers because there are already enough issues reported, and they are just not getting fixed anyway.
+
+
+3.6.2: 2020-1-5 Samish
+======================
+
+Yet again the focus has been on just fixing bugs, mostly geared in the
+later 3.x range. To get some sense what sill needs fixing, consult
+test/stdlib/runtests.sh. And that only has a portion of what's known.
+
+`make_function.py` has gotten so complex that it was split out into 3 parts
+to handle different version ranges: Python <3, Python 3.0..3.6 and Python 3.7+.
+
+An important fix is that we had been dropping docstrings in Python 3 code as a result
+of a incomplete merge from the decompile3 base with respect to the transform phase.
+
+Also important (at least to me) is that we can now handle 3.6+
+variable type annotations.  Some of the decompile3 code uses that in
+its source code, and I now use variable annotations in conjunction
+with mypy in some of my other Python projects
+
+Code generation for imports, especially where the import is dotted
+changed a bit in 3.7; with this release are just now tracking that
+change better. For this I've added pseudo instruction
+`IMPORT_NAME_ATTR`, derived from the `IMPORT_NAME` instruction, to
+indicate when an import contains a dotted import. Similarly, code for
+3.7 `import .. as ` is basically the same as `from .. import`, the
+only difference is the target of the name changes to an "alias" in the
+former. As a result, the disambiguation is now done on the semantic
+action side, rathero than in parsing grammar rules.
+
+Some small specific fixes:
+
+* 3.7+ some chained compare parsing has been fixed. Other remain.
+* better if/else rule checking in the 3.4 and below range.
+* 3.4+ keyword-only parameter handling was fixed more generally
+* 3.3 .. 3.5 keyword-only parameter args in lambda was fixed
+
+
+3.6.1: 2019-12-10 Christmas Hannukah
+====================================
+
+Overall, as in the past, the focus has been on just fixing bugs, more geared
+in the later 3.x range. Handling "async for/with" in 3.8+ works better.
+
+Numerous bugs around handling `lambda` with keyword-only and `*` args in the
+3.0-3.8 have been fixed. However many still remain.
+
+`binary_expr` and `unary_expr` have been renamed to `bin_op` and
+`unary_op` to better correspond the Python AST names.
+
+Some work was done Python 3.7+ to handle `and` better; less was done
+along the lines of handling `or`. Much more is needed to improve
+parsing stability of 3.7+. More of what was done with `and` needs to
+be done with `or` and this will happen first in the "decompyle3"
+project.
+
+Later this will probably be extended backwards to handle the 3.6-
+versions better. This however comes with a big decompilation speed
+penalty. When we redo control flow this should go back to normal, but
+for now, accuracy is more important than speed.
+
+Another `assert` transform rule was added. Parser rules to distingish
+`try/finally` in 3.8 were added and we are more stringent about what
+can be turned into an `assert`. There was some grammar cleanup here
+too.
+
+A number of small bugs were fixed, and some administrative changes to
+make `make check-short` really be short, but check more throughly what
+it checks. minimum xdis version needed was bumped to include in the
+newer 3.6-3.9 releases. See the `ChangeLog` for details.
+
+
 3.6.0: 2019-12-10 gecko gecko
 =============================
 
@@ -156,8 +359,7 @@ Lots of decomplation bugs, especially in the 3.x series fixed. Don't worry thoug
 3.3.0 2019-04-14 Holy Week
 ==========================
 
-* First cut at Python 3.8 (many bugs remain)
-* Reinstate -c | --compile (compile before disassembly) option
+* First cut at Python 3.8 (many bug remain)
 * The usual smattering of bug and doc fixes
 
 3.2.6 2019-03-23 Mueller Report

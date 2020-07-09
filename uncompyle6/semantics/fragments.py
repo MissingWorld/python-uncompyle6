@@ -67,8 +67,7 @@ from __future__ import print_function
 
 import re
 
-from xdis.code import iscode
-from xdis.magics import sysinfo2float
+from xdis import iscode, sysinfo2float
 from uncompyle6.semantics import pysource
 from uncompyle6 import parser
 from uncompyle6.scanner import Token, Code, get_scanner
@@ -963,7 +962,7 @@ class FragmentsWalker(pysource.SourceWalker, object):
 
         self.prune()
 
-    def n_listcomp(self, node):
+    def n_list_comp(self, node):
         self.write("[")
         if node[0].kind == "load_closure":
             self.listcomprehension_walk2(node)
@@ -1163,6 +1162,7 @@ class FragmentsWalker(pysource.SourceWalker, object):
                 # modularity is broken here
                 p_insts = self.p.insts
                 self.p.insts = self.scanner.insts
+                self.p.offset2inst_index = self.scanner.offset2inst_index
                 ast = python_parser.parse(self.p, tokens, customize)
                 self.p.insts = p_insts
             except (python_parser.ParserError, AssertionError) as e:
@@ -1200,10 +1200,11 @@ class FragmentsWalker(pysource.SourceWalker, object):
             # modularity is broken here
             p_insts = self.p.insts
             self.p.insts = self.scanner.insts
+            self.p.offset2inst_index = self.scanner.offset2inst_index
             ast = parser.parse(self.p, tokens, customize)
             self.p.insts = p_insts
         except (parser.ParserError, AssertionError) as e:
-            raise ParserError(e, tokens)
+            raise ParserError(e, tokens, {})
 
         maybe_show_tree(self, ast)
 

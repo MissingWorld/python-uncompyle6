@@ -1,4 +1,4 @@
-#  Copyright (c) 2019 by Rocky Bernstein
+#  Copyright (c) 2019-2020 by Rocky Bernstein
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -15,9 +15,13 @@
 """Isolate Python 3.5 version-specific semantic actions here.
 """
 
-from xdis.code import iscode
-from xdis.util import COMPILER_FLAG_BIT
-from uncompyle6.semantics.consts import INDENT_PER_LEVEL, TABLE_DIRECT
+from xdis import co_flags_is_async, iscode
+from uncompyle6.semantics.consts import (
+    INDENT_PER_LEVEL,
+    PRECEDENCE,
+    TABLE_DIRECT,
+)
+
 from uncompyle6.semantics.helper import flatten_list, gen_function_parens_adjust
 
 #######################
@@ -26,7 +30,11 @@ from uncompyle6.semantics.helper import flatten_list, gen_function_parens_adjust
 def customize_for_version35(self, version):
     TABLE_DIRECT.update(
         {
-            "await_expr": ("await %c", 0),
+            # nested await expressions like:
+            #   return await (await bar())
+            # need parenthesis.
+            "await_expr": ("await %p", (0, PRECEDENCE["await_expr"]-1)),
+
             "await_stmt": ("%|%c\n", 0),
             "async_for_stmt": ("%|async for %c in %c:\n%+%|%c%-\n\n", 9, 1, 25),
             "async_forelse_stmt": (
@@ -36,12 +44,12 @@ def customize_for_version35(self, version):
                 25,
                 (27, "else_suite"),
             ),
-            "async_with_stmt": ("%|async with %c:\n%+%c%-", (0, "expr"), 7),
+            "async_with_stmt": ("%|async with %c:\n%+%c%-", (0, "expr"), 3),
             "async_with_as_stmt": (
                 "%|async with %c as %c:\n%+%c%-",
                 (0, "expr"),
-                (6, "store"),
-                7,
+                (2, "store"),
+                3,
             ),
             "unmap_dict": ("{**%C}", (0, -1, ", **")),
             # "unmapexpr":	       ( "{**%c}", 0), # done by n_unmapexpr
@@ -123,6 +131,8 @@ def customize_for_version35(self, version):
     self.n_build_list_unpack = n_build_list_unpack
 
     def n_call(node):
+        p = self.prec
+        self.prec = 100
         mapping = self._get_mapping(node)
         table = mapping[0]
         key = node
@@ -159,7 +169,7 @@ def customize_for_version35(self, version):
             kwargs = (argc >> 8) & 0xFF
             # FIXME: handle annotation args
             if nargs > 0:
-                template = ("%c(%C, ", 0, (1, nargs + 1, ", "))
+                template = ("%c(%P, ", 0, (1, nargs + 1, ", ", 100))
             else:
                 template = ("%c(", 0)
             self.template_engine(template, node)
@@ -172,14 +182,16 @@ def customize_for_version35(self, version):
                 self.template_engine(template, args_node)
             else:
                 if len(node) - nargs > 3:
-                    template = ("*%c, %C)", nargs + 1, (nargs + kwargs + 1, -1, ", "))
+                    template = ("*%c, %P)", nargs + 1, (nargs + kwargs + 1, -1, ", ", 100))
                 else:
                     template = ("*%c)", nargs + 1)
                 self.template_engine(template, node)
+            self.prec = p
             self.prune()
         else:
             gen_function_parens_adjust(key, node)
 
+        self.prec = 100
         self.default(node)
 
     self.n_call = n_call
@@ -194,14 +206,7 @@ def customize_for_version35(self, version):
         pass
 
         is_code = hasattr(code_node, "attr") and iscode(code_node.attr)
-        return is_code and (
-            code_node.attr.co_flags
-            & (
-                COMPILER_FLAG_BIT["COROUTINE"]
-                | COMPILER_FLAG_BIT["ITERABLE_COROUTINE"]
-                | COMPILER_FLAG_BIT["ASYNC_GENERATOR"]
-            )
-        )
+        return is_code and co_flags_is_async(code_node.attr.co_flags)
 
     def n_function_def(node):
         if is_async_fn(node):

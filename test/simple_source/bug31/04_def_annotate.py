@@ -66,6 +66,14 @@ def div(a: dict(type=float, help='the dividend'),
     """Divide a by b"""
     return a / b
 
+# From 3.7.6 functools.py
+# Bug is in picking up the annotation.
+def f(a:"This is a new annotation"):
+    """This is a test"""
+    assert f.__annotations__['a'] == "This is a new annotation"
+
+f(5)
+
 class TestSignatureObject1():
     def test_signature_on_wkwonly(self):
         def test(*, a:float, b:str, c:str = 'test', **kwargs: int) -> int:
@@ -150,3 +158,12 @@ ann2(1)
 assert test12(1, 2, 3, name='hi') == (1, (2, 3)), "a, *args, name"
 assert test13(1, 2, 3, name='hi') == ((1, 2, 3), 'hi'), "*args, name"
 assert test16('localhost', loop=2, limit=3, a='b') == ('localhost', None, 2, 3, {'a': 'b'})
+
+# From test 3.5 test_pydoc.py.
+# Bug was in 3.5 and earlier handling of the return type, typing.Tuple[...]
+try:
+    import typing
+    def foo() -> typing.Iterator[typing.Tuple[int, typing.Any]]:
+        ...
+except:
+    pass

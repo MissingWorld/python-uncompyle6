@@ -54,7 +54,7 @@ only; another patched that and handled only 3.3.  You get the
 idea. This code pulls all of these forks together and *moves
 forward*. There is some serious refactoring and cleanup in this code
 base over those old forks. Even more experimental refactoring is going
-on in decompile3_.
+on in decompyle3_.
 
 This demonstrably does the best in decompiling Python across all
 Python versions. And even when there is another project that only
@@ -68,10 +68,9 @@ are syntactically correct by running the Python interpreter for that
 bytecode version.  Finally, in cases where the program has a test for
 itself, we can run the check on the decompiled code.
 
-We are serious about testing, and use automated processes to find
-bugs. In the issue trackers for other decompilers, you will find a
-number of bugs we've found along the way. Very few to none of them are
-fixed in the other decompilers.
+We use an automated processes to find bugs. In the issue trackers for
+other decompilers, you will find a number of bugs we've found along
+the way. Very few to none of them are fixed in the other decompilers.
 
 Requirements
 ------------
@@ -140,9 +139,16 @@ Python syntax changes, you should use this option if the bytecode is
 the right bytecode for the Python interpreter that will be checking
 the syntax.
 
-You can also cross compare the results with another python decompiler
-like pycdc_ . Since they work differently, bugs here often aren't in
-that, and vice versa.
+You can also cross compare the results with either another version of
+`uncompyle6` since there are are sometimes regressions in decompiling
+specific bytecode as the overall quality improves.
+
+For Python 3.7 and above, the code in decompyle3_ is generally
+better.
+
+Or try specific another python decompiler like uncompyle2_, unpyc37_,
+or pycdc_.  Since the later two work differently, bugs here often
+aren't in that, and vice versa.
 
 There is an interesting class of these programs that is readily
 available give stronger verification: those programs that when run
@@ -165,15 +171,11 @@ All of the Python decompilers that I have looked at have problems
 decompiling Python's control flow. In some cases we can detect an
 erroneous decompilation and report that.
 
-Python support is strongest in Python 2 for 2.7 and drops off as you
-get further away from that. Support is also probably pretty good for
-python 2.3-2.4 since a lot of the goodness of early the version of the
-decompiler from that era has been preserved (and Python compilation in
-that era was minimal)
+Python support is pretty good for Python 2
 
-There is some work to do on the lower end Python versions which is
-more difficult for us to handle since we don't have a Python
-interpreter for versions 1.6, and 2.0.
+On the lower end of Python versions, decompilation seems pretty good although
+we don't have any automated testing in place for Python's distributed tests.
+Also, we don't have a Python interpreter for versions 1.6, and 2.0.
 
 In the Python 3 series, Python support is is strongest around 3.4 or
 3.3 and drops off as you move further away from those versions. Python
@@ -188,7 +190,7 @@ added. So in sum handling control flow by ad hoc means as is currently
 done is worse.
 
 Between Python 3.5, 3.6, 3.7 there have been major changes to the
-:code:`MAKE_FUNCTION` and :code:`CALL_FUNCTION` instructions.  Python
+:code:`MAKE_FUNCTION` and :code:`CALL_FUNCTION` instructions.
 
 Python 3.8 removes :code:`SETUP_LOOP`, :code:`SETUP_EXCEPT`,
 :code:`BREAK_LOOP`, and :code:`CONTINUE_LOOP`, instructions which may
@@ -204,26 +206,51 @@ however that the magic of a released version is usually the same as
 the *last* candidate version prior to release.
 
 There are also customized Python interpreters, notably Dropbox,
-which use their own magic and encrypt bytcode. With the exception of
+which use their own magic and encrypt bytecode. With the exception of
 the Dropbox's old Python 2.5 interpreter this kind of thing is not
 handled.
 
-We also don't handle PJOrion_ obfuscated code. For that try: PJOrion
-Deobfuscator_ to unscramble the bytecode to get valid bytecode before
-trying this tool. This program can't decompile Microsoft Windows EXE
-files created by Py2EXE_, although we can probably decompile the code
-after you extract the bytecode properly. For situations like this, you
-might want to consider a decompilation service like `Crazy Compilers
-<http://www.crazy-compilers.com/decompyle/>`_.  Handling
-pathologically long lists of expressions or statements is slow.
+We also don't handle PJOrion_ or otherwise obfuscated code. For
+PJOrion try: PJOrion Deobfuscator_ to unscramble the bytecode to get
+valid bytecode before trying this tool. This program can't decompile
+Microsoft Windows EXE files created by Py2EXE_, although we can
+probably decompile the code after you extract the bytecode
+properly. Handling pathologically long lists of expressions or
+statements is slow. We don't handle Cython_ or MicroPython_ which don't use bytecode.
 
+There are numerous bugs in decompilation. And that's true for every
+other CPython decompiler I have encountered, even the ones that
+claimed to be "perfect" on some particular version like 2.4.
 
-There is lots to do, so please dig in and help.
+As Python progresses decompilation also gets harder because the
+compilation is more sophisticated and the language itself is more
+sophisticated. I suspect that attempts there will be fewer ad-hoc
+attempts like unpyc37_ (which is based on a 3.3 decompiler) simply
+because it is harder to do so. The good news, at least from my
+standpoint, is that I think I understand what's needed to address the
+problems in a more robust way. But right now until such time as
+project is better funded, I do not intend to make any serious effort
+to support Python versions 3.8 or 3.9, including bugs that might come
+in. I imagine at some point I may be interested in it.
+
+You can easily find bugs by running the tests against the standard
+test suite that Python uses to check itself. At any given time, there are
+dozens of known problems that are pretty well isolated and that could
+be solved if one were to put in the time to do so. The problem is that
+there aren't that many people who have been working on bug fixing.
+
+Some of the bugs in 3.7 and 3.8 are simply a matter of back-porting
+the fixes in decmopyle3.
+
+You may run across a bug, that you want to report. Please do so. But
+be aware that it might not get my attention for a while. If you
+sponsor or support the project in some way, I'll prioritize your
+issues above the queue of other things I might be doing instead.
 
 See Also
 --------
 
-* https://github.com/rocky/python-decompile3 : Much smaller and more modern code, focusing on 3.7+. Changes in that will get migrated back ehre.
+* https://github.com/rocky/python-decompile3 : Much smaller and more modern code, focusing on 3.7+. Changes in that will get migrated back here.
 * https://code.google.com/archive/p/unpyc3/ : supports Python 3.2 only. The above projects use a different decompiling technique than what is used here. Currently unmaintained.
 * https://github.com/figment/unpyc3/ : fork of above, but supports Python 3.3 only. Includes some fixes like supporting function annotations. Currently unmaintained.
 * https://github.com/wibiti/uncompyle2 : supports Python 2.7 only, but does that fairly well. There are situations where :code:`uncompyle6` results are incorrect while :code:`uncompyle2` results are not, but more often uncompyle6 is correct when uncompyle2 is not. Because :code:`uncompyle6` adheres to accuracy over idiomatic Python, :code:`uncompyle2` can produce more natural-looking code when it is correct. Currently :code:`uncompyle2` is lightly maintained. See its issue `tracker <https://github.com/wibiti/uncompyle2/issues>`_ for more details
@@ -232,16 +259,20 @@ See Also
 * https://github.com/rocky/python-xdis : Cross Python version disassembler
 * https://github.com/rocky/python-xasm : Cross Python version assembler
 * https://github.com/rocky/python-uncompyle6/wiki : Wiki Documents which describe the code and aspects of it in more detail
-* https://github.com/zrax/pycdc : The README for this C++ code syas it aims to support all versions of Python. It is best for Python versions around 2.7 and 3.3 when the code was initially developed. Accuracy for current versions of Python3 and early versions of Python is lacking. Without major effort, it is unlikely it can be made to support current Python 3. See its `issue tracker <https://github.com/zrax/pycdc/issues>`_ for details. Currently lightly maintained.
+* https://github.com/zrax/pycdc : The README for this C++ code says it aims to support all versions of Python. It is best for Python versions around 2.7 and 3.3 when the code was initially developed. Accuracy for current versions of Python3 and early versions of Python is lacking. Without major effort, it is unlikely it can be made to support current Python 3. See its `issue tracker <https://github.com/zrax/pycdc/issues>`_ for details. Currently lightly maintained.
 
 
+.. _Cython: https://en.wikipedia.org/wiki/Cython
+.. _MicroPython: https://micropotyon.org
 .. _trepan: https://pypi.python.org/pypi/trepan2g
 .. _compiler: https://pypi.python.org/pypi/spark_parser
 .. _HISTORY: https://github.com/rocky/python-uncompyle6/blob/master/HISTORY.md
 .. _debuggers: https://pypi.python.org/pypi/trepan3k
 .. _remake: https://bashdb.sf.net/remake
 .. _pycdc: https://github.com/zrax/pycdc
-.. _decompile3: https://github.com/rocky/python-decompile3
+.. _decompyle3: https://github.com/rocky/python-decompile3
+.. _uncompyle2: https://github.com/wibiti/uncompyle2
+.. _unpyc37: https://github.com/andrew-tavera/unpyc37
 .. _this: https://github.com/rocky/python-uncompyle6/wiki/Deparsing-technology-and-its-use-in-exact-location-reporting
 .. |buildstatus| image:: https://travis-ci.org/rocky/python-uncompyle6.svg
 		 :target: https://travis-ci.org/rocky/python-uncompyle6

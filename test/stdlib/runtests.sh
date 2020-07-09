@@ -1,10 +1,12 @@
 #!/bin/bash
 me=${BASH_SOURCE[0]}
 
-typeset -i batch=1
-isatty=$(/usr/bin/tty 2>/dev/null)
-if [[ -n $isatty ]] && [[ "$isatty" != 'not a tty' ]] ; then
-    batch=0
+typeset -i BATCH=${BATCH:-0}
+if (( ! BATCH )) ; then
+    isatty=$(/usr/bin/tty 2>/dev/null)
+    if [[ -n $isatty ]] && [[ "$isatty" != 'not a tty' ]] ; then
+	BATCH=0
+    fi
 fi
 
 
@@ -28,195 +30,88 @@ MINOR=${FULLVERSION##?.?.}
 
 STOP_ONERROR=${STOP_ONERROR:-1}
 
+typeset -i timeout=15
+
+function timeout_cmd {
+
+  (
+    $@ &
+    child=$!
+    trap -- "" SIGTERM
+    (
+	sleep "$timeout"
+	if ps -p $child >/dev/null ; then
+	    echo ""
+	    echo >&1 "**Killing ${2}; takes more than $timeout seconds to run"
+	    kill -TERM ${child}
+	fi
+    ) &
+    wait "$child"
+  )
+}
+
 typeset -A SKIP_TESTS
 case $PYVERSION in
     2.4)
-	SKIP_TESTS=(
-	    [test_dis.py]=1   # We change line numbers - duh!
-	    [test_grp.py]=1      # Long test - might work Control flow?
-	    [test_pep247.py]=1 # Long test - might work? Control flow?
-	    [test_pwd.py]=1 # Long test - might work? Control flow?
-	    [test_pyclbr.py]=1 # Investigate
-	    [test_socketserver.py]=1 # -- test takes too long to run: 40 seconds
-	    [test_threading.py]=1 # test takes too long to run: 11 seconds
-	    [test_thread.py]=1 # test takes too long to run: 36 seconds
-	    [test_trace.py]=1 # Long test - works
-	    [test_zipfile64.py]=1  # Runs ok but takes 204 seconds
-	)
+	. ./2.4-exclude.sh
 	;;
     2.5)
-	SKIP_TESTS=(
-	    [test_contextlib.py]=1 # Syntax error - look at
-	    [test_dis.py]=1        # We change line numbers - duh!
-	    [test_grammar.py]=1    # Too many stmts. Handle large stmts
-	    [test_grp.py]=1        # Long test - might work Control flow?
-	    [test_pdb.py]=1        # Line-number specific
-	    [test_pep247.py]=1     # "assert xxx or .." not detected properly in check_hash_module()
-	    [test_pep352.py]=1     # Investigate
-	    [test_pwd.py]=1 # Long test - might work? Control flow?
-	    [test_pyclbr.py]=1 # Investigate
-	    [test_queue.py]=1 # Control flow?
-	    [test_re.py]=1 # Possibly try confused with try-else again
-	    [test_struct.py]=1 # "if and" confused for if .. assert and
-	    [test_sys.py]=1 # try confused with try-else again; in test_current_frames()
-	    [test_tarfile.py]=1  # try confused with try-else again; top-level import
-	    [test_threading.py]=1 # test takes too long to run: 11 seconds
-	    [test_thread.py]=1 # test takes too long to run: 36 seconds
-	    [test_trace.py]=1  # Line numbers are expected to be different
-	    [test_zipfile64.py]=1  # Runs ok but takes 204 seconds
-	)
+	. ./2.5-exclude.sh
 	;;
     2.6)
-	SKIP_TESTS=(
-	    [test_aepack.py]=1 # Fails on its own
-	    [test_codeccallbacks.py]=1  # Fails on its own
-	    [test_compile.py]=1  # Intermittent - sometimes works and sometimes doesn't
-	    [test_exceptions.py]=1
-	    [test_grp.py]=1      # Long test - might work Control flow?
-	    [test_pep352.py]=1     # Investigate
-	    [test_pprint.py]=1
-	    [test_pyclbr.py]=1 # Investigate
-	    [test_pwd.py]=1 # Long test - might work? Control flow?
-	    [test_trace.py]=1  # Line numbers are expected to be different
-	    [test_urllib2net.py]=1 # Fails on its own. May need interactive input
-	    [test_zipfile64.py]=1  # Skip Long test
-	    [test_zlib.py]=1  # Takes too long to run (more than 3 minutes 39 seconds)
-	    # .pyenv/versions/2.6.9/lib/python2.6/lib2to3/refactor.pyc
-	    # .pyenv/versions/2.6.9/lib/python2.6/pyclbr.pyc
-	)
-	if (( batch )) ; then
-	    # Fails in crontab environment?
-	    # Figure out what's up here
-	    SKIP_TESTS[test_aifc.py]=1
-	    SKIP_TESTS[test_array.py]=1
-
-	    # SyntaxError: Non-ASCII character '\xdd' in file test_base64.py on line 153, but no encoding declared; see http://www.python.org/peps/pep-0263.html for details
-	    SKIP_TESTS[test_base64.py]=1
-
-	    # output indicates expected == output, but this fails anyway.
-	    # Maybe the underlying encoding is subtlely different so it
-	    # looks the same?
-	    SKIP_TESTS[test_pprint.py]=1
-	fi
+	. ./2.6-exclude.sh
 	;;
     2.7)
+	. ./2.7-exclude.sh
+	;;
+    3.0)
 	SKIP_TESTS=(
-	    # These are ok, but our test machine POWER has problems
-	    # so we skip..
-	    [test_httplib.py]=1  # Ok, but POWER has problems with this
-	    [test_pdb.py]=1 # Ok, but POWER has problems with this
-
-	    [test_capi.py]=1
-	    [test_curses.py]=1  # Possibly fails on its own but not detected
-	    [test test_cmd_line.py]=1 # Takes too long, maybe hangs, or looking for interactive input?
+	    [test_array.py]=1  # Handling of bytestring
+	    [test_binascii.py]=1 # handling of bytearray?
+	    [test_concurrent_futures.py]=1 # too long to run over 46 seconds by itself
+	    [test_datetimetester.py]=1
+	    [test_decimal.py]=1
 	    [test_dis.py]=1   # We change line numbers - duh!
-	    [test_doctest.py]=1 # Fails on its own
-	    [test_exceptions.py]=1
-	    [test_format.py]=1  # control flow. uncompyle2 does not have problems here
-	    [test_grammar.py]=1     # Too many stmts. Handle large stmts
-	    [test_grp.py]=1     # test takes to long, works interactively though
-	    [test_io.py]=1 # Test takes too long to run
-	    [test_ioctl.py]=1 # Test takes too long to run
-	    [test_long.py]=1
-	    [test_long_future.py]=1
-	    [test_math.py]=1
-	    [test_memoryio.py]=1 # FIX
-	    [test_modulefinder.py]=1 # FIX
-	    [test_multiprocessing.py]=1 # On uncompyle2, takes 24 secs
-	    [test_pwd.py]=1     # Takes too long
-	    [test_pty.py]=1
-	    [test_runpy.py]=1   # Long and fails on its own
-	    [test_select.py]=1  # Runs okay but takes 11 seconds
-	    [test_socket.py]=1  # Runs ok but takes 22 seconds
-	    [test_subprocess.py]=1 # Runs ok but takes 22 seconds
-	    [test_sys_setprofile.py]=1
-	    [test_sys_settrace.py]=1 # Line numbers are expected to be different
-	    [test_traceback.py]=1 # Line numbers change - duh.
-	    [test_unicode.py]=1  # Too long to run 11 seconds
-	    [test_xpickle.py]=1 # Runs ok but takes 72 seconds
-	    [test_zipfile64.py]=1  # Runs ok but takes 204 seconds
-	    [test_zipimport.py]=1  # FIXME: improper try from try/else ?
-        )
-	if (( batch )) ; then
+	    [test_fileio.py]=1
+	)
+	if (( BATCH )) ; then
 	    # Fails in crontab environment?
 	    # Figure out what's up here
-	    SKIP_TESTS[test_array.py]=1
-	    SKIP_TESTS[test_ast.py]=1
-	    SKIP_TESTS[test_audioop.py]=1
-
-	    # SyntaxError: Non-ASCII character '\xdd' in file test_base64.py on line 153, but no encoding declared; see http://www.python.org/peps/pep-0263.html for details
-	    SKIP_TESTS[test_base64.py]=1
+	    SKIP_TESTS[test_exception_variations.py]=1
 	fi
+	;;
+    3.1)
+	SKIP_TESTS=(
+	    [test_concurrent_futures.py]=1 # too long to run over 46 seconds by itself
+	    [test_dis.py]=1   # We change line numbers - duh!
+	    [test_fileio.py]=1
+	)
+	if (( BATCH )) ; then
+	    # Fails in crontab environment?
+	    # Figure out what's up here
+	    SKIP_TESTS[test_exception_variations.py]=1
+	fi
+	;;
+    3.2)
+	. ./3.2-exclude.sh
 	;;
     3.3)
-	SKIP_TESTS=(
-	    [test_atexit.py]=1  #
-	    [test_decorators.py]=1  # Control flow wrt "if elif"
-	)
-	if (( batch )) ; then
-	    # Fails in crontab environment?
-	    # Figure out what's up here
-	    SKIP_TESTS[test_exception_variations.py]=1
-	    SKIP_TESTS[test_quopri.py]=1
-	fi
+	. ./3.3-exclude.sh
 	;;
-
+    3.4)
+	. ./3.4-exclude.sh
+	;;
     3.5)
-	SKIP_TESTS=(
-	    [test_atexit.py]=1  #
-	    [test_decorators.py]=1  # Control flow wrt "if elif"
-	    [test_dis.py]=1   # We change line numbers - duh!
-	)
-	if (( batch )) ; then
-	    # Fails in crontab environment?
-	    # Figure out what's up here
-	    SKIP_TESTS[test_exception_variations.py]=1
-	    SKIP_TESTS[test_quopri.py]=1
-	fi
+	. ./3.5-exclude.sh
 	;;
-
     3.6)
-	SKIP_TESTS=(
-	    [test_contains.py]=1    # Code "while False: yield None" is optimized away in compilation
-	    [test_decorators.py]=1  # Control flow wrt "if elif"
-	    [test_dis.py]=1   # We change line numbers - duh!
-	    [test_pow.py]=1         # Control flow wrt "continue"
-	    [test_quopri.py]=1      # Only fails on POWER
-	)
+	. ./3.6-exclude.sh
 	;;
     3.7)
-	SKIP_TESTS=(
-	    [test_ast.py]=1  #
-	    [test_atexit.py]=1  #
-	    [test_bdb.py]=1  #
-	    [test_buffer.py]=1  #
-	    [test_builtin.py]=1  #
-	    [test_c_locale_coercion.py]=1 # Parse error
-	    [test_cmdline.py]=1  # Interactive?
-	    [test_codecs-3.7.py]=1
-	    [test_collections.py]=1  # Investigate syntax error: self.assertEqual(p, Point(**))
-	    [test_compare.py]=1
-	    [test_compile.py]=1
-	    [test_complex.py]=1  # Investigate: NameError: global name 'infj' is not defined
-	    [test_contains.py]=1    # Code "while False: yield None" is optimized away in compilation
-	    [test_contextlib_async.py]=1 # Investigate
-	    [test_context.py]=1
-	    [test_coroutines.py]=1 # Parse error
-	    [test_curses.py]=1 # Parse error
-	    [test_cmath.py]=1  # Syntax error - investigate
-	    [test_decorators.py]=1  # Control flow wrt "if elif"
-	    [test_dis.py]=1   # We change line numbers - duh!
-	    # ...
-	)
+	. ./3.7-exclude.sh
+	;;
     3.8)
-	SKIP_TESTS=(
-	    [test_contains.py]=1    # Code "while False: yield None" is optimized away in compilation
-	    [test_decorators.py]=1  # Control flow wrt "if elif"
-	    [test_dis.py]=1   # We change line numbers - duh!
-	    [test_pow.py]=1         # Control flow wrt "continue"
-	    [test_quopri.py]=1      # Only fails on POWER
-	    # ...
-	)
+	. ./3.8-exclude.sh
 	;;
     *)
 	SKIP_TESTS=( [test_aepack.py]=1
@@ -234,6 +129,7 @@ fulldir=$(pwd)
 
 # DECOMPILER=uncompyle2
 DECOMPILER=${DECOMPILER:-"$fulldir/../../bin/uncompyle6"}
+OPTS=${OPTS:-""}
 TESTDIR=/tmp/test${PYVERSION}
 if [[ -e $TESTDIR ]] ; then
     rm -fr $TESTDIR
@@ -241,20 +137,36 @@ fi
 
 PYENV_ROOT=${PYENV_ROOT:-$HOME/.pyenv}
 pyenv_local=$(pyenv local)
+
+echo Python version is $pyenv_local
+
+# pyenv version update
+for dir in ../ ../../ ; do
+    cp -v .python-version $dir
+done
+
+
 mkdir $TESTDIR || exit $?
 cp -r ${PYENV_ROOT}/versions/${PYVERSION}.${MINOR}/lib/python${PYVERSION}/test $TESTDIR
-cd $TESTDIR/test
+if [[ $PYVERSION == 3.2 ]] ; then
+    cp ${PYENV_ROOT}/versions/${PYVERSION}.${MINOR}/lib/python${PYVERSION}/test/* $TESTDIR
+    cd $TESTDIR
+else
+    cd $TESTDIR/test
+fi
 pyenv local $FULLVERSION
 export PYTHONPATH=$TESTDIR
 export PATH=${PYENV_ROOT}/shims:${PATH}
+
+DONT_SKIP_TESTS=${DONT_SKIP_TESTS:-0}
 
 # Run tests
 typeset -i i=0
 typeset -i allerrs=0
 if [[ -n $1 ]] ; then
-    files=$1
-    typeset -a files_ary=( $(echo $1) )
-    if (( ${#files_ary[@]} == 1 )) ; then
+    files=$@
+    typeset -a files_ary=( $(echo $@) )
+    if (( ${#files_ary[@]} == 1 || DONT_SKIP_TESTS == 1 )) ; then
 	SKIP_TESTS=()
     fi
 else
@@ -264,23 +176,29 @@ fi
 typeset -i ALL_FILES_STARTTIME=$(date +%s)
 typeset -i skipped=0
 
+NOT_INVERTED_TESTS=${NOT_INVERTED_TESTS:-1}
+
 for file in $files; do
     # AIX bash doesn't grok [[ -v SKIP... ]]
-    if [[ ${SKIP_TESTS[$file]} == 1 ]] ; then
+    [[ -z ${SKIP_TESTS[$file]} ]] && SKIP_TESTS[$file]=0
+    if [[ ${SKIP_TESTS[$file]} == ${NOT_INVERTED_TESTS} ]] ; then
 	((skipped++))
 	continue
     fi
 
     # If the fails *before* decompiling, skip it!
     typeset -i STARTTIME=$(date +%s)
-    if ! python $file >/dev/null 2>&1 ; then
+    if [ ! -r $file ]; then
+	echo "Skipping test $file -- not readable. Does it exist?"
+	continue
+    elif ! python $file >/dev/null 2>&1 ; then
 	echo "Skipping test $file -- it fails on its own"
 	continue
     fi
     typeset -i ENDTIME=$(date +%s)
     typeset -i time_diff
     (( time_diff =  ENDTIME - STARTTIME))
-    if (( time_diff > 10 )) ; then
+    if (( time_diff > $timeout )) ; then
 	echo "Skipping test $file -- test takes too long to run: $time_diff seconds"
 	continue
     fi
@@ -292,11 +210,11 @@ for file in $files; do
     $fulldir/compile-file.py $file && \
     mv $file{,.orig} && \
     echo ==========  $(date +%X) Decompiling $file ===========
-    $DECOMPILER $decompiled_file > $file
+    $DECOMPILER $OPTS $decompiled_file > $file
     rc=$?
     if (( rc == 0 )) ; then
 	echo ========== $(date +%X) Running $file ===========
-	python $file
+	timeout_cmd python $file
 	rc=$?
     else
 	echo ======= Skipping $file due to compile/decompile errors ========
@@ -311,7 +229,8 @@ typeset -i ALL_FILES_ENDTIME=$(date +%s)
 
 (( time_diff =  ALL_FILES_ENDTIME - ALL_FILES_STARTTIME))
 
-printf "Ran $i unit-test files in "
+printf "Ran $i unit-test files, $allerrs errors; Elapsed time: "
 displaytime $time_diff
 echo "Skipped $skipped test for known failures."
+cd $fulldir/../.. && pyenv local $FULLVERSION
 exit $allerrs

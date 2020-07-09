@@ -1,4 +1,4 @@
-# Copyright (C) 2018 Rocky Bernstein <rocky@gnu.org>
+# Copyright (C) 2018, 2020 Rocky Bernstein <rocky@gnu.org>
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -21,9 +21,20 @@
 # less elegant than having it here with reduced code, albeit there
 # still is some room for improvement.
 
+# Python-version | package | last-version |
+# -----------------------------------------
+# 2.5            | pip     |  1.1         |
+# 2.6            | pip     |  1.5.6       |
+# 2.7            | pip     | 19.2.3       |
+# 2.7            | pip     |  1.2.1       |
+# 3.1            | pip     |  1.5.6       |
+# 3.2            | pip     |  7.1.2       |
+# 3.3            | pip     | 10.0.1       |
+# 3.4            | pip     | 19.1.1       |
+
 # Things that change more often go here.
 copyright   = """
-Copyright (C) 2015-2019 Rocky Bernstein <rb@dustyfeet.com>.
+Copyright (C) 2015-2020 Rocky Bernstein <rb@dustyfeet.com>.
 """
 
 classifiers =  ["Development Status :: 5 - Production/Stable",
@@ -58,7 +69,7 @@ entry_points       = {
     ]}
 ftp_url            = None
 install_requires   = ["spark-parser >= 1.8.9, < 1.9.0",
-                      "xdis >= 4.2.1, < 4.3.0"]
+                      "xdis >= 4.7.0, <5.1.0"]
 
 license            = "GPL3"
 mailing_list       = "python-debugger@googlegroups.com"

@@ -12,9 +12,8 @@ jobs:
       COMPILE: --compile
     # To see the list of pre-built images that CircleCI provides for most common languages see
     # https://circleci.com/docs/2.0/circleci-images/
-    machine:
-      python:
-        version: 2.7.14
+    docker:
+      - image: circleci/python:3.6.9
     steps:
     # Machine Setup
     #   If you break your build into multiple jobs with workflows, you will probably want to do the parts of this that are relevant in each
@@ -27,7 +26,7 @@ jobs:
     # This is based on your 1.0 configuration file or project settings
     - run:
         working_directory: ~/rocky/python-uncompyle6
-        command: pip install virtualenv && pip install nose && pip install pep8 && pyenv rehash
+        command: pip install --user virtualenv && pip install --user nose && pip install --user pep8
     # Dependencies
     #   This would typically go in either a build or a build-and-test job when using workflows
     # Restore the dependency cache
@@ -37,10 +36,11 @@ jobs:
           # fallback to using the latest cache if no exact match is found
           - v2-dependencies-
 
-    # This is based on your 1.0 configuration file or project settings
-    - run: pip install --upgrade setuptools
-    - run: pip install -e .
-    - run: pip install -r requirements-dev.txt
+    - run:
+        command: | # Use pip to install dependengcies
+          pip install --user --upgrade setuptools
+          pip install --user -e .
+          pip install --user -r requirements-dev.txt
 
     # Save dependency cache
     - save_cache:
@@ -58,7 +58,7 @@ jobs:
     # Test
     #   This would typically be a build job when using workflows, possibly combined with build
     # This is based on your 1.0 configuration file or project settings
-    - run: python ./setup.py develop && make check-2.7
+    - run: sudo python ./setup.py develop && make check-3.6
     - run: cd ./test/stdlib && bash ./runtests.sh 'test_[p-z]*.py'
     # Teardown
     #   If you break your build into multiple jobs with workflows, you will probably want to do the parts of this that are relevant in each

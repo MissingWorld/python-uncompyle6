@@ -5,6 +5,7 @@ import os, sys, py_compile
 
 assert len(sys.argv) >= 2
 version = sys.version[0:3]
+vers = sys.version_info[:2]
 if sys.argv[1] in ("--run", "-r"):
     suffix = "_run"
     py_source = sys.argv[2:]
@@ -19,6 +20,10 @@ for path in py_source:
     else:
         cfile = "bytecode_%s%s/%s" % (version, suffix, short) + "c"
     print("byte-compiling %s to %s" % (path, cfile))
-    py_compile.compile(path, cfile)
-    if isinstance(version, str) or version >= (2, 6, 0):
+    optimize = 2
+    if vers >= (3, 0):
+        py_compile.compile(path, cfile, optimize=optimize)
+    else:
+        py_compile.compile(path, cfile)
+    if vers >= (2, 6):
         os.system("../bin/uncompyle6 -a -T %s" % cfile)
